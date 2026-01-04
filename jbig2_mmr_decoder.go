@@ -202,7 +202,7 @@ func (m *MMRDecompressor) getNextCodeWord() (int, error) {
 			return 0, err
 		}
 		m.stream.SetBitPos(savedBitPos)
-		m.lastCode = int(val) << 8
+		m.lastCode = int(val)
 		m.lastOffset = offset
 	}
 	return m.lastCode, nil
@@ -262,6 +262,7 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 			refIdx++
 			bitPos = refOffsets[refIdx]
 			refIdx++
+			continue
 		case mmrHoriz:
 			for i := 0; i < 2; i++ {
 				var table []*mmrCode
