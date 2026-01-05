@@ -258,6 +258,12 @@ func (d *Decoder) DecodeAll() ([]image.Image, error) {
 	return images, nil
 }
 
+// GetDocument 获取文档对象
+// 返回: *Document 文档对象
+func (d *Decoder) GetDocument() *Document {
+	return d.doc
+}
+
 // Decode 解码JBIG2数据包含的第一页
 // 入参: r 读取器
 // 返回: image.Image 图像, error 错误信息

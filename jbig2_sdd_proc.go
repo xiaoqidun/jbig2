@@ -22,6 +22,7 @@ import (
 type SDDProc struct {
 	SDHUFF        bool
 	SDREFAGG      bool
+	SDMMR         bool
 	SDRTEMPLATE   bool
 	SDTEMPLATE    uint8
 	SDNUMINSYMS   uint32
@@ -411,11 +412,37 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				stream.AddOffset(stride * HCHEIGHT)
 			} else {
 				pGRD := NewGRDProc()
-				pGRD.MMR = true
+				if s.SDHUFF {
+					pGRD.MMR = true
+				} else {
+					pGRD.MMR = s.SDMMR
+				}
 				pGRD.GBW = TOTWIDTH
 				pGRD.GBH = HCHEIGHT
-				pGRD.StartDecodeMMR(&BHC, stream)
-				stream.AlignByte()
+				if !pGRD.MMR {
+					pGRD.GBAT = [8]int8{0, 0, 0, 0, 0, 0, 0, 0}
+					gbContexts := make([]ArithCtx, 65536)
+					arithDecoder := NewArithDecoder(stream)
+					var err error
+					BHC, err = pGRD.DecodeArith(arithDecoder, gbContexts)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					if stream.GetByteLeft() < uint32(BMSIZE) {
+						return nil, errors.New("insufficient data for mmr")
+					}
+					mmrData := make([]byte, BMSIZE)
+					for i := int32(0); i < BMSIZE; i++ {
+						val, err := stream.Read1Byte()
+						if err != nil {
+							return nil, err
+						}
+						mmrData[i] = val
+					}
+					mmrStream := NewBitStream(mmrData, 0)
+					pGRD.StartDecodeMMR(&BHC, mmrStream)
+				}
 			}
 			if BHC != nil {
 				nTmp := uint32(0)

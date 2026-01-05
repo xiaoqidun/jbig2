@@ -107,6 +107,13 @@ func (i *Image) Fill(v bool) {
 	}
 }
 
+// Invert 反转图像像素
+func (i *Image) Invert() {
+	for idx := range i.data {
+		i.data[idx] = ^i.data[idx]
+	}
+}
+
 // ComposeTo 将当前图像组合到目标图像
 // 入参: dst 目标图像, x 轴坐标, y 轴坐标, op 组合操作
 func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {

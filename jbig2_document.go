@@ -49,6 +49,18 @@ type Document struct {
 	OrgMode         int
 }
 
+// GetSegments 获取段列表
+// 返回: []*Segment 段列表
+func (d *Document) GetSegments() []*Segment {
+	return d.segmentList
+}
+
+// GetGlobalContext 获取全局上下文
+// 返回: *Document 全局上下文
+func (d *Document) GetGlobalContext() *Document {
+	return d.globalContext
+}
+
 // PageInfo 页面信息
 type PageInfo struct {
 	Width             uint32
@@ -355,9 +367,10 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	sdd := NewSDDProc()
 	sdd.SDHUFF = (flags & 0x0001) != 0
 	sdd.SDREFAGG = ((flags >> 1) & 0x0001) != 0
-	sdd.SDTEMPLATE = uint8((flags >> 10) & 0x0003)
-	sdd.SDRTEMPLATE = ((flags >> 12) & 0x0003) != 0
+	sdd.SDMMR = ((flags >> 10) & 0x01) != 0
 	if !sdd.SDHUFF {
+		sdd.SDTEMPLATE = uint8((flags >> 2) & 0x0003)
+		sdd.SDRTEMPLATE = ((flags >> 4) & 0x0001) != 0
 		dwTemp := 2
 		if sdd.SDTEMPLATE == 0 {
 			dwTemp = 8
@@ -406,6 +419,8 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	if sdd.SDHUFF {
 		cSDHUFFDH := (flags >> 2) & 0x0003
 		cSDHUFFDW := (flags >> 4) & 0x0003
+		cSDHUFFBMSIZE := (flags >> 6) & 0x0001
+		cSDHUFFAGGINST := (flags >> 7) & 0x0001
 		if cSDHUFFDH == 2 || cSDHUFFDW == 2 {
 			return ResultFailure
 		}
@@ -441,7 +456,6 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 				return ResultFailure
 			}
 		}
-		cSDHUFFBMSIZE := (flags >> 6) & 0x0001
 		if cSDHUFFBMSIZE == 0 {
 			sdd.SDHUFFBMSIZE = NewStandardTable(1)
 		} else {
@@ -453,7 +467,6 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 			}
 		}
 		if sdd.SDREFAGG {
-			cSDHUFFAGGINST := (flags >> 7) & 0x0001
 			if cSDHUFFAGGINST == 0 {
 				sdd.SDHUFFAGGINST = NewStandardTable(1)
 			} else {
@@ -683,9 +696,12 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		pTRD.SBDSOFFSET = pTRD.SBDSOFFSET - 0x20
 	}
 	pTRD.SBRTEMPLATE = ((flags >> 15) & 0x0001) != 0
+	var huffFlags uint16
 	if pTRD.SBHUFF {
-		if _, err := d.stream.ReadShortInteger(); err != nil {
+		if val, err := d.stream.ReadShortInteger(); err != nil {
 			return ResultFailure
+		} else {
+			huffFlags = val
 		}
 	}
 	if pTRD.SBREFINE && !pTRD.SBRTEMPLATE {
@@ -745,14 +761,21 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		pTRD.SBSYMCODELEN = uint8(dwTemp)
 	}
 	if pTRD.SBHUFF {
-		cSBHUFFFS := flags & 0x0003
-		cSBHUFFDS := (flags >> 2) & 0x0003
-		cSBHUFFDT := (flags >> 4) & 0x0003
-		cSBHUFFRDW := (flags >> 6) & 0x0003
-		cSBHUFFRDH := (flags >> 8) & 0x0003
-		cSBHUFFRDX := (flags >> 10) & 0x0003
-		cSBHUFFRDY := (flags >> 12) & 0x0003
-		cSBHUFFRSIZE := (flags >> 14) & 0x0001
+		cSBHUFFFS := huffFlags & 0x0003
+		cSBHUFFDS := (huffFlags >> 2) & 0x0003
+		cSBHUFFDT := (huffFlags >> 4) & 0x0003
+		cSBHUFFRDW := (huffFlags >> 6) & 0x0003
+		cSBHUFFRDH := (huffFlags >> 8) & 0x0003
+		cSBHUFFRDX := (huffFlags >> 10) & 0x0003
+		cSBHUFFRDY := (huffFlags >> 12) & 0x0003
+		cSBHUFFRSIZE := (huffFlags >> 14) & 0x0001
+		if !pTRD.SBREFINE {
+			cSBHUFFRDW = 0
+			cSBHUFFRDH = 0
+			cSBHUFFRDX = 0
+			cSBHUFFRDY = 0
+			cSBHUFFRSIZE = 0
+		}
 		if cSBHUFFFS == 2 || cSBHUFFRDW == 2 || cSBHUFFRDH == 2 || cSBHUFFRDX == 2 || cSBHUFFRDY == 2 {
 			return ResultFailure
 		}
@@ -1071,7 +1094,6 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	pGRD.GBH = uint32(ri.Height)
 	pGRD.MMR = (flags & 0x01) != 0
 	pGRD.GBTEMPLATE = (flags >> 1) & 0x03
-	pGRD.TPGDON = ((flags >> 3) & 0x01) != 0
 	pGRD.TPGDON = ((flags >> 3) & 0x01) != 0
 	if !pGRD.MMR {
 		if pGRD.GBTEMPLATE == 0 {

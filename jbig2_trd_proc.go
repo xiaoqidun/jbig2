@@ -21,7 +21,7 @@ import (
 // ComposeData 混合数据
 type ComposeData struct {
 	x, y      int32
-	increment uint32
+	increment int32
 }
 
 // JBig2Corner 角落位置枚举
@@ -83,40 +83,40 @@ func NewTRDProc() *TRDProc {
 // 返回: ComposeData 混合位置信息
 func (t *TRDProc) GetComposeData(SI, TI int32, WI, HI uint32) ComposeData {
 	var results ComposeData
+	s := SI
+	t_val := TI
 	if !t.TRANSPOSED {
+		results.x = s
+		results.y = t_val
 		switch t.REFCORNER {
-		case JBig2CornerTopLeft:
-			results.x = SI
-			results.y = TI
-			results.increment = WI - 1
-		case JBig2CornerTopRight:
-			results.x = SI - int32(WI) + 1
-			results.y = TI
 		case JBig2CornerBottomLeft:
-			results.x = SI
-			results.y = TI - int32(HI) + 1
-			results.increment = WI - 1
+			results.y = t_val - int32(HI) + 1
 		case JBig2CornerBottomRight:
-			results.x = SI - int32(WI) + 1
-			results.y = TI - int32(HI) + 1
+			results.x = s - int32(WI) + 1
+			results.y = t_val - int32(HI) + 1
+		case JBig2CornerTopLeft:
+			results.x = s
+			results.y = t_val
+		case JBig2CornerTopRight:
+			results.x = s - int32(WI) + 1
 		}
+		results.increment = int32(WI) - 1
 	} else {
+		results.x = t_val
+		results.y = s
 		switch t.REFCORNER {
-		case JBig2CornerTopLeft:
-			results.x = TI
-			results.y = SI
-			results.increment = HI - 1
-		case JBig2CornerTopRight:
-			results.x = TI - int32(WI) + 1
-			results.y = SI
-			results.increment = HI - 1
 		case JBig2CornerBottomLeft:
-			results.x = TI
-			results.y = SI - int32(HI) + 1
+			results.x = t_val - int32(HI) + 1
 		case JBig2CornerBottomRight:
-			results.x = TI - int32(WI) + 1
-			results.y = SI - int32(HI) + 1
+			results.x = t_val - int32(HI) + 1
+			results.y = s - int32(WI) + 1
+		case JBig2CornerTopLeft:
+			results.x = t_val
+			results.y = s
+		case JBig2CornerTopRight:
+			results.y = s - int32(WI) + 1
 		}
+		results.increment = int32(HI) - 1
 	}
 	return results
 }
@@ -157,8 +157,7 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 	if res := decoder.DecodeAValue(t.SBHUFFDT, &initialStript); res != 0 {
 		return nil, errors.New("huffman decode failed for sbhuffdt")
 	}
-	STRIPT := int64(initialStript) * int64(t.SBSTRIPS)
-	STRIPT = -STRIPT
+	STRIPT := -int64(initialStript) * int64(t.SBSTRIPS)
 	FIRSTS := int64(0)
 	NINSTANCES := uint32(0)
 	for NINSTANCES < t.SBNUMINSTANCES {
@@ -187,7 +186,11 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 				if res != 0 {
 					return nil, errors.New("huffman decode failed for sbhuffds")
 				}
-				CURS += int64(ids) + int64(t.SBDSOFFSET)
+				currDso := int32(t.SBDSOFFSET)
+				if currDso >= 16 {
+					currDso -= 32
+				}
+				CURS += int64(ids) + int64(currDso)
 			}
 			CURT := int32(0)
 			if t.SBSTRIPS != 1 {
@@ -295,9 +298,7 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 				SI := int32(CURS)
 				compose := t.GetComposeData(SI, TI, WI, HI)
 				IBI.ComposeTo(sbReg, int32(compose.x), int32(compose.y), t.SBCOMBOP)
-				if compose.increment > 0 {
-					CURS += int64(compose.increment)
-				}
+				CURS += int64(compose.increment)
 				NINSTANCES++
 			}
 		}
@@ -389,7 +390,11 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 				if !ok {
 					break
 				}
-				CURS += int64(idsVal) + int64(t.SBDSOFFSET)
+				dso := int32(t.SBDSOFFSET)
+				if dso >= 16 {
+					dso -= 32
+				}
+				CURS += int64(idsVal) + int64(dso)
 			}
 			if NINSTANCES >= t.SBNUMINSTANCES {
 				break
