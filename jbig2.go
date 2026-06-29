@@ -24,6 +24,9 @@ import (
 	"io"
 )
 
+// jbig2Signature JBIG2文件签名
+var jbig2Signature = []byte{0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A}
+
 // Decoder JBIG2解码器
 type Decoder struct {
 	doc       *Document
@@ -34,69 +37,9 @@ type Decoder struct {
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	data, err := io.ReadAll(r)
+	data, err := readDecoderData(r)
 	if err != nil {
 		return nil, err
-	}
-	if len(data) > 8 && data[0] == 'C' && data[1] == 'W' && data[2] == 'S' {
-		zr, err := zlib.NewReader(bytes.NewReader(data[8:]))
-		if err != nil {
-			return nil, err
-		}
-		defer zr.Close()
-		decompressed, err := io.ReadAll(zr)
-		if err != nil {
-			return nil, err
-		}
-		data = decompressed
-		if len(data) > 0 {
-			nbits := int(data[0] >> 3)
-			rectBits := 5 + nbits*4
-			rectBytes := (rectBits + 7) / 8
-			startOffset := rectBytes + 4
-			if len(data) > startOffset {
-				data = data[startOffset:]
-				for len(data) >= 2 {
-					tagCodeAndLen := int(data[0]) | (int(data[1]) << 8)
-					tagCode := tagCodeAndLen >> 6
-					tagLen := tagCodeAndLen & 0x3F
-					headerLen := 2
-					if tagLen == 0x3F {
-						if len(data) >= 6 {
-							tagLen = int(data[2]) | (int(data[3]) << 8) | (int(data[4]) << 16) | (int(data[5]) << 24)
-							headerLen = 6
-						} else {
-							break
-						}
-					}
-					if tagCode == 0 {
-						break
-					}
-					if tagCode == 6 || tagCode == 21 || tagCode == 35 || tagCode == 90 {
-						skipBytes := 2
-						if tagCode == 35 || tagCode == 90 {
-							skipBytes = 6
-						}
-						payloadOffset := headerLen + skipBytes
-						if len(data) > payloadOffset {
-							data = data[payloadOffset:]
-							break
-						}
-					}
-					nextOffset := headerLen + tagLen
-					if len(data) >= nextOffset {
-						data = data[nextOffset:]
-					} else {
-						break
-					}
-				}
-			}
-		}
-		jbig2Signature := []byte{0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A}
-		idx := bytes.Index(data, jbig2Signature)
-		if idx != -1 {
-			data = data[idx:]
-		}
 	}
 	data, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
 	if data == nil {
@@ -112,64 +55,9 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 // 入参: r 读取器, globals 全局段数据
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
-	data, err := io.ReadAll(r)
+	data, err := readDecoderData(r)
 	if err != nil {
 		return nil, err
-	}
-	if len(data) > 8 && data[0] == 'C' && data[1] == 'W' && data[2] == 'S' {
-		zr, err := zlib.NewReader(bytes.NewReader(data[8:]))
-		if err != nil {
-			return nil, err
-		}
-		defer zr.Close()
-		decompressed, err := io.ReadAll(zr)
-		if err != nil {
-			return nil, err
-		}
-		data = decompressed
-		if len(data) > 0 {
-			nbits := int(data[0] >> 3)
-			rectBits := 5 + nbits*4
-			rectBytes := (rectBits + 7) / 8
-			startOffset := rectBytes + 4
-			if len(data) > startOffset {
-				data = data[startOffset:]
-				for len(data) >= 2 {
-					tagCodeAndLen := int(data[0]) | (int(data[1]) << 8)
-					tagCode := tagCodeAndLen >> 6
-					tagLen := tagCodeAndLen & 0x3F
-					headerLen := 2
-					if tagLen == 0x3F {
-						if len(data) >= 6 {
-							tagLen = int(data[2]) | (int(data[3]) << 8) | (int(data[4]) << 16) | (int(data[5]) << 24)
-							headerLen = 6
-						} else {
-							break
-						}
-					}
-					if tagCode == 0 {
-						break
-					}
-					if tagCode == 6 || tagCode == 21 || tagCode == 35 || tagCode == 90 {
-						skipBytes := 2
-						if tagCode == 35 || tagCode == 90 {
-							skipBytes = 6
-						}
-						payloadOffset := headerLen + skipBytes
-						if len(data) > payloadOffset {
-							data = data[payloadOffset:]
-							break
-						}
-					}
-					nextOffset := headerLen + tagLen
-					if len(data) >= nextOffset {
-						data = data[nextOffset:]
-					} else {
-						break
-					}
-				}
-			}
-		}
 	}
 	probedData, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
 	if probedData == nil {
@@ -193,19 +81,110 @@ func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
 	doc := NewDocument(data, globals, randomAccess, littleEndian)
 	doc.OrgMode = orgMode
 	doc.Grouped = grouped
-	for {
-		res := doc.globalContext.DecodeSequential()
-		if res == ResultEndReached {
-			break
-		}
-		if res == ResultFailure {
-			return nil, errors.New("failed to parse global segments")
-		}
-		if res == ResultPageCompleted {
-			continue
-		}
+	if err := doc.parseGlobalSegments(); err != nil {
+		return nil, err
 	}
 	return &Decoder{doc: doc, pageIndex: 0}, nil
+}
+
+// parseGlobalSegments 解析全局段
+// 返回: error 错误信息
+func (d *Document) parseGlobalSegments() error {
+	if d == nil || d.globalContext == nil {
+		return nil
+	}
+	for {
+		res := d.globalContext.DecodeSequential()
+		if res == ResultEndReached {
+			return nil
+		}
+		if res == ResultFailure {
+			return errors.New("failed to parse global segments")
+		}
+	}
+}
+
+// readDecoderData 读取解码数据
+// 入参: r 读取器
+// 返回: []byte 数据, error 错误信息
+func readDecoderData(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeDecoderData(data)
+}
+
+// normalizeDecoderData 规范化解码数据
+// 入参: data 数据
+// 返回: []byte 数据, error 错误信息
+func normalizeDecoderData(data []byte) ([]byte, error) {
+	if len(data) <= 8 || data[0] != 'C' || data[1] != 'W' || data[2] != 'S' {
+		return data, nil
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(data[8:]))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	decompressed, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, err
+	}
+	data = skipSWFHeader(decompressed)
+	if idx := bytes.Index(data, jbig2Signature); idx != -1 {
+		data = data[idx:]
+	}
+	return data, nil
+}
+
+// skipSWFHeader 跳过SWF头和标签
+// 入参: data 数据
+// 返回: []byte 数据
+func skipSWFHeader(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	nbits := int(data[0] >> 3)
+	rectBits := 5 + nbits*4
+	rectBytes := (rectBits + 7) / 8
+	startOffset := rectBytes + 4
+	if len(data) <= startOffset {
+		return data
+	}
+	data = data[startOffset:]
+	for len(data) >= 2 {
+		tagCodeAndLen := int(data[0]) | (int(data[1]) << 8)
+		tagCode := tagCodeAndLen >> 6
+		tagLen := tagCodeAndLen & 0x3F
+		headerLen := 2
+		if tagLen == 0x3F {
+			if len(data) < 6 {
+				break
+			}
+			tagLen = int(data[2]) | (int(data[3]) << 8) | (int(data[4]) << 16) | (int(data[5]) << 24)
+			headerLen = 6
+		}
+		if tagCode == 0 {
+			break
+		}
+		if tagCode == 6 || tagCode == 21 || tagCode == 35 || tagCode == 90 {
+			skipBytes := 2
+			if tagCode == 35 || tagCode == 90 {
+				skipBytes = 6
+			}
+			payloadOffset := headerLen + skipBytes
+			if len(data) > payloadOffset {
+				return data[payloadOffset:]
+			}
+		}
+		nextOffset := headerLen + tagLen
+		if len(data) < nextOffset {
+			break
+		}
+		data = data[nextOffset:]
+	}
+	return data
 }
 
 // Decode 解码下一页
@@ -307,7 +286,6 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 // 入参: data 数据
 // 返回: probed 探测后的数据, randomAccess 是否随机访问, littleEndian 是否小端序, orgMode 组织模式, grouped 是否分组
 func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian bool, orgMode int, grouped bool) {
-	jbig2Signature := []byte{0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A}
 	if len(data) < 8 || !bytes.HasPrefix(data, jbig2Signature) {
 		return nil, false, false, 0, false
 	}
@@ -358,7 +336,6 @@ func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian b
 		}
 		flagsByte := data[cfg.Offset+hStart]
 		hStart++
-		_ = flagsByte & 0x3F
 		pageAssocSize := (flagsByte & 0x40) != 0
 		if len(data) <= cfg.Offset+hStart {
 			continue

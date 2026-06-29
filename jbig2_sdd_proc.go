@@ -168,8 +168,14 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					if sbsyms_idi == nil {
 						return nil, errors.New("referenced symbol is nil")
 					}
-					RDXI, _ := IARDX.Decode(arithDecoder)
-					RDYI, _ := IARDY.Decode(arithDecoder)
+					RDXI, ok := IARDX.Decode(arithDecoder)
+					if !ok {
+						return nil, errors.New("failed to decode refinement x")
+					}
+					RDYI, ok := IARDY.Decode(arithDecoder)
+					if !ok {
+						return nil, errors.New("failed to decode refinement y")
+					}
 					pGRRD := NewGRRDProc()
 					pGRRD.GRW = SYMWIDTH
 					pGRRD.GRH = HCHEIGHT
@@ -363,7 +369,6 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 						return nil, errors.New("failed to decode refinement values")
 					}
 					stream.AlignByte()
-					nTmpOffset := stream.GetOffset()
 					pGRRD := NewGRRDProc()
 					pGRRD.GRW = SYMWIDTH
 					pGRRD.GRH = HCHEIGHT
@@ -381,8 +386,6 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					}
 					stream.AlignByte()
 					stream.AddOffset(2)
-					if uint32(nVal) != (stream.GetOffset() - nTmpOffset) {
-					}
 				}
 				SDNEWSYMS[NSYMSDECODED] = BS
 			}
@@ -404,6 +407,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					return nil, errors.New("insufficient data for grid")
 				}
 				BHC = NewImage(int32(TOTWIDTH), int32(HCHEIGHT))
+				if BHC == nil {
+					return nil, errors.New("failed to create grid image")
+				}
 				data := stream.GetPointer()
 				bhcData := BHC.Data()
 				for i := uint32(0); i < HCHEIGHT; i++ {
@@ -441,7 +447,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 						mmrData[i] = val
 					}
 					mmrStream := NewBitStream(mmrData, 0)
-					pGRD.StartDecodeMMR(&BHC, mmrStream)
+					if pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError || BHC == nil {
+						return nil, errors.New("mmr decoding failure")
+					}
 				}
 			}
 			if BHC != nil {

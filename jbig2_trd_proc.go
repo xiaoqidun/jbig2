@@ -149,7 +149,7 @@ func checkTRDReferenceDimension(dimension int32, shift uint32, offset int32) (in
 func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Image, error) {
 	sbReg := NewImage(int32(t.SBW), int32(t.SBH))
 	if sbReg == nil {
-		return nil, nil
+		return nil, errors.New("failed to create text region image")
 	}
 	sbReg.Fill(t.SBDEFPIXEL)
 	decoder := NewHuffmanDecoder(stream)
@@ -356,7 +356,7 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 	}
 	sbReg := NewImage(int32(t.SBW), int32(t.SBH))
 	if sbReg == nil {
-		return nil, nil
+		return nil, errors.New("failed to create text region image")
 	}
 	sbReg.Fill(t.SBDEFPIXEL)
 	var initialStript int32
@@ -381,7 +381,10 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 		CURS := int64(0)
 		for {
 			if bFirst {
-				dfs, _ := pIAFS.Decode(arithDecoder)
+				dfs, ok := pIAFS.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("iafs decode failed")
+				}
 				FIRSTS += int64(dfs)
 				CURS = FIRSTS
 				bFirst = false
@@ -401,7 +404,10 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 			}
 			CURT := int32(0)
 			if t.SBSTRIPS != 1 {
-				res, _ := pIAIT.Decode(arithDecoder)
+				res, ok := pIAIT.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("iait decode failed")
+				}
 				CURT = res
 			}
 			TI := int32(STRIPT + int64(CURT))
@@ -414,7 +420,10 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 			}
 			RI := int32(0)
 			if t.SBREFINE {
-				res, _ := pIARI.Decode(arithDecoder)
+				res, ok := pIARI.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("failed to decode refinement flag")
+				}
 				RI = res
 			}
 			var IBI *Image
@@ -423,10 +432,22 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 					IBI = t.SBSYMS[IDI]
 				}
 			} else {
-				rdwi, _ := pIARDW.Decode(arithDecoder)
-				rdhi, _ := pIARDH.Decode(arithDecoder)
-				rdxi, _ := pIARDX.Decode(arithDecoder)
-				rdyi, _ := pIARDY.Decode(arithDecoder)
+				rdwi, ok := pIARDW.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("failed to decode refinement width")
+				}
+				rdhi, ok := pIARDH.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("failed to decode refinement height")
+				}
+				rdxi, ok := pIARDX.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("failed to decode refinement x")
+				}
+				rdyi, ok := pIARDY.Decode(arithDecoder)
+				if !ok {
+					return nil, errors.New("failed to decode refinement y")
+				}
 				IBOI := t.SBSYMS[IDI]
 				if IBOI != nil {
 					WOI, okW := checkTRDDimension(uint32(IBOI.width), rdwi)
@@ -443,7 +464,10 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 						pGRRD.GRREFERENCEDY = refDY
 						pGRRD.TPGRON = false
 						pGRRD.GRAT = t.SBRAT
-						IBI, _ = pGRRD.Decode(arithDecoder, grContexts)
+						IBI, err = pGRRD.Decode(arithDecoder, grContexts)
+						if err != nil {
+							return nil, err
+						}
 					}
 				}
 			}

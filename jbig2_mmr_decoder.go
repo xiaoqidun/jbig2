@@ -212,6 +212,9 @@ func (m *MMRDecompressor) getNextCodeWord() (int, error) {
 // 返回: *Image 图像对象, error 错误信息
 func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	img := NewImage(int32(m.width), int32(m.height))
+	if img == nil {
+		return nil, errors.New("failed to create image")
+	}
 	img.Fill(false)
 	currOffsets := make([]int, m.width+5)
 	refOffsets := make([]int, m.width+5)
@@ -355,7 +358,10 @@ func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int
 // detectAndSkipEOL 检测并跳过 EOL
 func (m *MMRDecompressor) detectAndSkipEOL() {
 	for {
-		code, _ := m.getNextCode(modeTable)
+		code, err := m.getNextCode(modeTable)
+		if err != nil {
+			break
+		}
 		if code != nil && code.runLength == mmrEOL {
 			m.stream.SetBitPos(m.stream.GetBitPos() + uint32(code.bitLength))
 		} else {

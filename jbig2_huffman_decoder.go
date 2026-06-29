@@ -103,31 +103,22 @@ func (h *HuffmanTable) parseFromCodedBuffer(stream *BitStream) bool {
 		return false
 	}
 	h.HTOOB = val != 0
-	val, err = stream.ReadNBits(3)
+	_, err = stream.ReadNBits(3)
 	if err != nil {
 		return false
 	}
-	HTPS := val + 1
-	val, err = stream.ReadNBits(4)
+	_, err = stream.ReadNBits(4)
 	if err != nil {
 		return false
 	}
-	HTRS := val + 1
-	val, err = stream.ReadInteger()
+	_, err = stream.ReadInteger()
 	if err != nil {
 		return false
 	}
-	htLow := int32(val)
-	val, err = stream.ReadInteger()
+	_, err = stream.ReadInteger()
 	if err != nil {
 		return false
 	}
-	htHigh := int32(val)
-	h.CODES = make([]HuffmanCode, 0)
-	_ = HTPS
-	_ = HTRS
-	_ = htLow
-	_ = htHigh
 	return false
 }
 

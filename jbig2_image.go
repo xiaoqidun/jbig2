@@ -120,8 +120,27 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	if i == nil || dst == nil {
 		return
 	}
-	for h := int32(0); h < i.height; h++ {
-		for w := int32(0); w < i.width; w++ {
+	srcX0 := int64(0)
+	srcY0 := int64(0)
+	srcX1 := int64(i.width)
+	srcY1 := int64(i.height)
+	if x < 0 {
+		srcX0 = -int64(x)
+	}
+	if y < 0 {
+		srcY0 = -int64(y)
+	}
+	if right := int64(x) + srcX1; right > int64(dst.width) {
+		srcX1 = int64(dst.width) - int64(x)
+	}
+	if bottom := int64(y) + srcY1; bottom > int64(dst.height) {
+		srcY1 = int64(dst.height) - int64(y)
+	}
+	if srcX0 >= srcX1 || srcY0 >= srcY1 {
+		return
+	}
+	for h := int32(srcY0); h < int32(srcY1); h++ {
+		for w := int32(srcX0); w < int32(srcX1); w++ {
 			dstX := x + w
 			dstY := y + h
 			srcBit := i.GetPixel(w, h)

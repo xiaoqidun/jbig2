@@ -32,21 +32,18 @@ const (
 
 // Document 文档上下文
 type Document struct {
-	stream          *BitStream
-	globalContext   *Document
-	segmentList     []*Segment
-	page            *Image
-	pageInfoList    []*PageInfo
-	symbolDictCache map[uint64]*SymbolDict
-	segment         *Segment
-	offset          uint32
-	inPage          bool
-	bufSpecified    bool
-	pauseStep       int
-	randomAccess    bool
-	isGlobal        bool
-	Grouped         bool
-	OrgMode         int
+	stream        *BitStream
+	globalContext *Document
+	segmentList   []*Segment
+	page          *Image
+	pageInfoList  []*PageInfo
+	segment       *Segment
+	offset        uint32
+	inPage        bool
+	bufSpecified  bool
+	randomAccess  bool
+	Grouped       bool
+	OrgMode       int
 }
 
 // GetSegments 获取段列表
@@ -79,15 +76,14 @@ func NewDocument(data []byte, globalData []byte, randomAccess bool, littleEndian
 	stream := NewBitStream(data, 0)
 	stream.SetLittleEndian(littleEndian)
 	doc := &Document{
-		stream:          stream,
-		symbolDictCache: make(map[uint64]*SymbolDict),
-		randomAccess:    randomAccess,
+		stream:       stream,
+		randomAccess: randomAccess,
 	}
 	if len(globalData) > 0 {
+		globalStream := NewBitStream(globalData, 0)
+		globalStream.SetLittleEndian(littleEndian)
 		doc.globalContext = &Document{
-			stream:          NewBitStream(globalData, 0),
-			isGlobal:        true,
-			symbolDictCache: doc.symbolDictCache,
+			stream: globalStream,
 		}
 	}
 	return doc
@@ -424,7 +420,7 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 		if cSDHUFFDH == 2 || cSDHUFFDW == 2 {
 			return ResultFailure
 		}
-		tableSegments := make([]*Segment, 0)
+		var tableSegments []*Segment
 		for _, refNum := range segment.ReferredToSegmentNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg != nil && seg.Flags.Type == 53 {
@@ -563,6 +559,33 @@ func (d *Document) ParseRegionInfo(ri *RegionInfo) Result {
 		ri.Flags = val
 	}
 	return ResultSuccess
+}
+
+// composeOpFromRegionFlags 从区域标志获取组合操作
+// 入参: flags 区域标志
+// 返回: ComposeOp 组合操作
+func composeOpFromRegionFlags(flags uint8) ComposeOp {
+	if (flags & 0x07) == 4 {
+		return ComposeReplace
+	}
+	return ComposeOp(flags & 0x03)
+}
+
+// expandPageForRegion 根据区域扩展页面
+// 入参: ri 区域信息
+func (d *Document) expandPageForRegion(ri *RegionInfo) {
+	if d.bufSpecified || d.page == nil || len(d.pageInfoList) == 0 {
+		return
+	}
+	pi := d.pageInfoList[len(d.pageInfoList)-1]
+	if !pi.IsStriped {
+		return
+	}
+	newHeight := int64(ri.Y) + int64(ri.Height)
+	if newHeight <= int64(d.page.Height()) || newHeight > int64(1<<31-1) {
+		return
+	}
+	d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
 }
 
 // GetHuffmanTable 获取霍夫曼表
@@ -780,7 +803,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 			return ResultFailure
 		}
 		tableIdx := 0
-		tableSegments := make([]*Segment, 0)
+		var tableSegments []*Segment
 		for _, refNum := range segment.ReferredToSegmentNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg != nil && seg.Flags.Type == 53 {
@@ -854,13 +877,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 			pTRD.SBHUFFRSIZE = getUserTable()
 		}
 	}
-	getComposeOp := func(ri *RegionInfo) ComposeOp {
-		if (ri.Flags & 0x07) == 4 {
-			return ComposeReplace
-		}
-		return ComposeOp(ri.Flags & 0x03)
-	}
-	grContexts := make([]ArithCtx, 0)
+	var grContexts []ArithCtx
 	if pTRD.SBREFINE {
 		size := 8192
 		if pTRD.SBRTEMPLATE {
@@ -891,18 +908,8 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		return ResultFailure
 	}
 	if segment.Flags.Type != 4 {
-		if !d.bufSpecified {
-			if len(d.pageInfoList) > 0 {
-				pi := d.pageInfoList[len(d.pageInfoList)-1]
-				if pi.IsStriped {
-					newHeight := uint32(ri.Y) + uint32(ri.Height)
-					if newHeight > uint32(d.page.Height()) {
-						d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
-					}
-				}
-			}
-		}
-		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, getComposeOp(&ri))
+		d.expandPageForRegion(&ri)
+		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
 	}
 	return ResultSuccess
@@ -1054,22 +1061,8 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 		d.stream.AddOffset(2)
 	}
 	if segment.Flags.Type != 20 {
-		if !d.bufSpecified {
-			if len(d.pageInfoList) > 0 {
-				pi := d.pageInfoList[len(d.pageInfoList)-1]
-				if pi.IsStriped {
-					newHeight := uint32(ri.Y) + uint32(ri.Height)
-					if newHeight > uint32(d.page.Height()) {
-						d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
-					}
-				}
-			}
-		}
-		op := ComposeOp(ri.Flags & 0x03)
-		if (ri.Flags & 0x07) == 4 {
-			op = ComposeReplace
-		}
-		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, op)
+		d.expandPageForRegion(&ri)
+		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
 	}
 	return ResultSuccess
@@ -1135,23 +1128,9 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		d.stream.AddOffset(2)
 	}
 	if segment.Flags.Type != 36 {
-		if !d.bufSpecified {
-			if len(d.pageInfoList) > 0 {
-				pi := d.pageInfoList[len(d.pageInfoList)-1]
-				if pi.IsStriped {
-					newHeight := uint32(ri.Y) + uint32(ri.Height)
-					if newHeight > uint32(d.page.Height()) {
-						d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
-					}
-				}
-			}
-		}
-		op := ComposeOp(ri.Flags & 0x03)
-		if (ri.Flags & 0x07) == 4 {
-			op = ComposeReplace
-		}
 		rect := pGRD.GetReplaceRect()
-		d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, op)
+		d.expandPageForRegion(&ri)
+		d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
 	}
 	return ResultSuccess
@@ -1235,22 +1214,8 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	d.stream.AlignByte()
 	d.stream.AddOffset(2)
 	if segment.Flags.Type != 40 {
-		if !d.bufSpecified {
-			if len(d.pageInfoList) > 0 {
-				pi := d.pageInfoList[len(d.pageInfoList)-1]
-				if pi.IsStriped {
-					newHeight := uint32(ri.Y) + uint32(ri.Height)
-					if newHeight > uint32(d.page.Height()) {
-						d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
-					}
-				}
-			}
-		}
-		op := ComposeOp(ri.Flags & 0x03)
-		if (ri.Flags & 0x07) == 4 {
-			op = ComposeReplace
-		}
-		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, op)
+		d.expandPageForRegion(&ri)
+		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 	}
 	return ResultSuccess
 }
