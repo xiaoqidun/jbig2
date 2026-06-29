@@ -53,7 +53,7 @@ type ProgressiveArithDecodeState struct {
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
-		return JBig2SegmentParseComplete
+		return JBig2SegmentError
 	}
 	if *state.Image == nil {
 		*state.Image = NewImage(int32(g.GBW), int32(g.GBH))
@@ -73,6 +73,9 @@ func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2Segm
 // 入参: image 图像指针, stream 位流
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentState {
+	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
+		return JBig2SegmentError
+	}
 	*image = NewImage(int32(g.GBW), int32(g.GBH))
 	if *image == nil {
 		return JBig2SegmentError

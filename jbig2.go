@@ -154,7 +154,7 @@ func skipSWFHeader(data []byte) []byte {
 	}
 	data = data[startOffset:]
 	for len(data) >= 2 {
-		tagCodeAndLen := int(data[0]) | (int(data[1]) << 8)
+		tagCodeAndLen := int(readUint16(data, true))
 		tagCode := tagCodeAndLen >> 6
 		tagLen := tagCodeAndLen & 0x3F
 		headerLen := 2
@@ -162,7 +162,7 @@ func skipSWFHeader(data []byte) []byte {
 			if len(data) < 6 {
 				break
 			}
-			tagLen = int(data[2]) | (int(data[3]) << 8) | (int(data[4]) << 16) | (int(data[5]) << 24)
+			tagLen = int(readUint32(data[2:], true))
 			headerLen = 6
 		}
 		if tagCode == 0 {
@@ -324,12 +324,7 @@ func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian b
 			if len(data) <= cfg.Offset+4 {
 				continue
 			}
-			s1, s2, s3, s4 := uint32(data[cfg.Offset]), uint32(data[cfg.Offset+1]), uint32(data[cfg.Offset+2]), uint32(data[cfg.Offset+3])
-			if cfg.LittleEndian {
-				segNum = s1 | (s2 << 8) | (s3 << 16) | (s4 << 24)
-			} else {
-				segNum = (s1 << 24) | (s2 << 16) | (s3 << 8) | s4
-			}
+			segNum = readUint32(data[cfg.Offset:], cfg.LittleEndian)
 		}
 		if len(data) <= cfg.Offset+hStart {
 			continue
@@ -367,13 +362,7 @@ func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian b
 		if len(data) <= cfg.Offset+hStart+3 {
 			continue
 		}
-		dl1, dl2, dl3, dl4 := uint32(data[cfg.Offset+hStart]), uint32(data[cfg.Offset+hStart+1]), uint32(data[cfg.Offset+hStart+2]), uint32(data[cfg.Offset+hStart+3])
-		var dataLen uint32
-		if cfg.LittleEndian {
-			dataLen = dl1 | (dl2 << 8) | (dl3 << 16) | (dl4 << 24)
-		} else {
-			dataLen = (dl1 << 24) | (dl2 << 16) | (dl3 << 8) | dl4
-		}
+		dataLen := readUint32(data[cfg.Offset+hStart:], cfg.LittleEndian)
 		remaining := len(data) - (cfg.Offset + hStart + 4)
 		score := 0
 		if int(dataLen) <= remaining {
@@ -392,8 +381,7 @@ func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian b
 		hSize := hStart + 4
 		gIdx := cfg.Offset + hSize
 		if gIdx+5 < len(data) {
-			n1, n2, n3, n4 := data[gIdx], data[gIdx+1], data[gIdx+2], data[gIdx+3]
-			nSeg := uint32(n1)<<24 | uint32(n2)<<16 | uint32(n3)<<8 | uint32(n4)
+			nSeg := readUint32(data[gIdx:], false)
 			nType := data[gIdx+4] & 0x3F
 			if nSeg > 0 && nSeg < 1000 && nType <= 62 && nType != 0 {
 				candidateGrouped = true
@@ -425,12 +413,14 @@ func (i *Image) ToGoImage() image.Image {
 	img := image.NewGray(rect)
 	w, h := int(i.width), int(i.height)
 	for y := 0; y < h; y++ {
+		src := i.data[int32(y)*i.stride:]
+		dst := img.Pix[y*img.Stride:]
 		for x := 0; x < w; x++ {
-			bit := i.GetPixel(int32(x), int32(y))
-			if bit != 0 {
-				img.SetGray(x, y, color.Gray{Y: 0})
+			bit := (src[x>>3] >> uint(7-(x&7))) & 1
+			if bit == 0 {
+				dst[x] = 255
 			} else {
-				img.SetGray(x, y, color.Gray{Y: 255})
+				dst[x] = 0
 			}
 		}
 	}

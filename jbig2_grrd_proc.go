@@ -41,7 +41,10 @@ func NewGRRDProc() *GRRDProc {
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*Image, error) {
 	if g.GRW > JBig2MaxImageSize || g.GRH > JBig2MaxImageSize {
-		return NewImage(int32(g.GRW), int32(g.GRH)), nil
+		return nil, errors.New("image size too large")
+	}
+	if g.GRREFERENCE == nil {
+		return nil, errors.New("reference image is nil")
 	}
 	if !g.GRTEMPLATE {
 		if g.GRAT[0] == -1 && g.GRAT[1] == -1 && g.GRAT[2] == -1 && g.GRAT[3] == -1 &&

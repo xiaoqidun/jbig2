@@ -251,7 +251,6 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 					return nil, errors.New("huffman decode refine values failed")
 				}
 				stream.AlignByte()
-				nTmpOffset := stream.GetOffset()
 				IBOI := t.SBSYMS[IDI]
 				if IBOI == nil {
 					return nil, errors.New("failed to get iboi")
@@ -283,9 +282,6 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 				}
 				stream.AlignByte()
 				stream.AddOffset(2)
-				currentOffset := stream.GetOffset()
-				if uint32(uffrsize) != (currentOffset - nTmpOffset) {
-				}
 			}
 			if IBI != nil {
 				WI := uint32(IBI.width)

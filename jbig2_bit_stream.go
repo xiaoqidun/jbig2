@@ -41,10 +41,33 @@ func (bs *BitStream) SetLittleEndian(le bool) {
 	bs.littleEndian = le
 }
 
+// readUint32 读取4字节整数
+// 入参: data 数据, littleEndian 是否小端序
+// 返回: uint32 结果
+func readUint32(data []byte, littleEndian bool) uint32 {
+	if littleEndian {
+		return uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
+	}
+	return uint32(data[0])<<24 | uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
+}
+
+// readUint16 读取2字节整数
+// 入参: data 数据, littleEndian 是否小端序
+// 返回: uint16 结果
+func readUint16(data []byte, littleEndian bool) uint16 {
+	if littleEndian {
+		return uint16(data[0]) | uint16(data[1])<<8
+	}
+	return uint16(data[0])<<8 | uint16(data[1])
+}
+
 // ReadNBits 读取指定位数的整数
 // 入参: bits 位数
 // 返回: uint32 结果, error 错误信息
 func (b *BitStream) ReadNBits(bits uint32) (uint32, error) {
+	if bits > 32 {
+		return 0, errors.New("too many bits requested")
+	}
 	if !b.IsInBounds() {
 		return 0, errors.New("out of bounds")
 	}
@@ -110,12 +133,7 @@ func (b *BitStream) ReadInteger() (uint32, error) {
 	if uint64(b.byteIdx)+3 >= uint64(len(b.data)) {
 		return 0, errors.New("insufficient data")
 	}
-	var result uint32
-	if b.littleEndian {
-		result = (uint32(b.data[b.byteIdx])) | (uint32(b.data[b.byteIdx+1]) << 8) | (uint32(b.data[b.byteIdx+2]) << 16) | (uint32(b.data[b.byteIdx+3]) << 24)
-	} else {
-		result = (uint32(b.data[b.byteIdx]) << 24) | (uint32(b.data[b.byteIdx+1]) << 16) | (uint32(b.data[b.byteIdx+2]) << 8) | uint32(b.data[b.byteIdx+3])
-	}
+	result := readUint32(b.data[b.byteIdx:], b.littleEndian)
 	b.byteIdx += 4
 	return result, nil
 }
@@ -126,12 +144,7 @@ func (b *BitStream) ReadShortInteger() (uint16, error) {
 	if uint64(b.byteIdx)+1 >= uint64(len(b.data)) {
 		return 0, errors.New("insufficient data")
 	}
-	var result uint16
-	if b.littleEndian {
-		result = (uint16(b.data[b.byteIdx])) | (uint16(b.data[b.byteIdx+1]) << 8)
-	} else {
-		result = (uint16(b.data[b.byteIdx]) << 8) | uint16(b.data[b.byteIdx+1])
-	}
+	result := readUint16(b.data[b.byteIdx:], b.littleEndian)
 	b.byteIdx += 2
 	return result, nil
 }
