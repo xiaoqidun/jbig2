@@ -56,10 +56,11 @@ type RegionInfo struct {
 
 // HuffmanCode 霍夫曼编码
 type HuffmanCode struct {
-	Codelen int32
-	Code    int32
-	Val1    int32
-	Val2    int32
+	Codelen    int32
+	Code       int32
+	Val1       int32
+	Val2       int32
+	LowerRange bool
 }
 
 // Rect 矩形

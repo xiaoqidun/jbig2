@@ -260,8 +260,8 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 				if !okW || !okH {
 					return nil, errors.New("dimension check failed")
 				}
-				refDX, okDX := checkTRDReferenceDimension(rdwi, 2, rdxi)
-				refDY, okDY := checkTRDReferenceDimension(rdhi, 2, rdyi)
+				refDX, okDX := checkTRDReferenceDimension(rdwi, 1, rdxi)
+				refDY, okDY := checkTRDReferenceDimension(rdhi, 1, rdyi)
 				if !okDX || !okDY {
 					return nil, errors.New("ref check failed")
 				}

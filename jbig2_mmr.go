@@ -44,7 +44,7 @@ func DecodeG4(stream *BitStream, image *Image) error {
 	stride := int(image.Stride())
 	for y := 0; y < height; y++ {
 		if _, err := io.ReadFull(decoder, buf); err != nil {
-			break
+			return err
 		}
 		start := y * stride
 		if start+rowBytes > len(imgData) {

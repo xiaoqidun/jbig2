@@ -96,30 +96,76 @@ func (h *HuffmanTable) parseFromStandardTable(idx int) bool {
 // 入参: stream 位流
 // 返回: bool 是否成功
 func (h *HuffmanTable) parseFromCodedBuffer(stream *BitStream) bool {
-	var err error
-	var val uint32
-	val, err = stream.ReadNBits(1)
+	flags, err := stream.Read1Byte()
 	if err != nil {
 		return false
 	}
-	h.HTOOB = val != 0
-	_, err = stream.ReadNBits(3)
+	h.HTOOB = (flags & 0x01) != 0
+	prefixSizeBits := uint32((flags>>1)&0x07) + 1
+	rangeSizeBits := uint32((flags>>4)&0x07) + 1
+	val, err := stream.ReadInteger()
 	if err != nil {
 		return false
 	}
-	_, err = stream.ReadNBits(4)
+	lowestValue := int32(val)
+	val, err = stream.ReadInteger()
 	if err != nil {
 		return false
 	}
-	_, err = stream.ReadInteger()
+	highestValue := int32(val)
+	currentRangeLow := int64(lowestValue)
+	for currentRangeLow < int64(highestValue) {
+		prefixLength, err := stream.ReadNBits(prefixSizeBits)
+		if err != nil {
+			return false
+		}
+		rangeLength, err := stream.ReadNBits(rangeSizeBits)
+		if err != nil {
+			return false
+		}
+		h.CODES = append(h.CODES, HuffmanCode{
+			Codelen: int32(prefixLength),
+			Val1:    int32(rangeLength),
+			Val2:    int32(currentRangeLow),
+		})
+		currentRangeLow += int64(1) << rangeLength
+	}
+	prefixLength, err := stream.ReadNBits(prefixSizeBits)
 	if err != nil {
 		return false
 	}
-	_, err = stream.ReadInteger()
+	h.CODES = append(h.CODES, HuffmanCode{
+		Codelen:    int32(prefixLength),
+		Val1:       32,
+		Val2:       lowestValue - 1,
+		LowerRange: true,
+	})
+	prefixLength, err = stream.ReadNBits(prefixSizeBits)
 	if err != nil {
 		return false
 	}
-	return false
+	h.CODES = append(h.CODES, HuffmanCode{
+		Codelen: int32(prefixLength),
+		Val1:    32,
+		Val2:    highestValue,
+	})
+	if h.HTOOB {
+		prefixLength, err = stream.ReadNBits(prefixSizeBits)
+		if err != nil {
+			return false
+		}
+		h.CODES = append(h.CODES, HuffmanCode{
+			Codelen: int32(prefixLength),
+		})
+	}
+	h.NTEMP = uint32(len(h.CODES))
+	h.extendBuffers(false)
+	if err := HuffmanAssignCode(h.CODES); err != nil {
+		h.Ok = false
+	} else {
+		h.Ok = true
+	}
+	return h.Ok
 }
 
 // extendBuffers 扩展内部缓冲区
@@ -176,7 +222,11 @@ func (h *HuffmanDecoder) DecodeAValue(table *HuffmanTable, result *int32) int {
 					if err != nil {
 						return -1
 					}
-					*result = rlow + int32(offset)
+					if table.CODES[i].LowerRange {
+						*result = rlow - int32(offset)
+					} else {
+						*result = rlow + int32(offset)
+					}
 				} else {
 					*result = rlow
 				}

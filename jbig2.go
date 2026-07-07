@@ -200,7 +200,9 @@ func (d *Decoder) Decode() (image.Image, error) {
 				d.doc.inPage = false
 				d.pageIndex++
 				img := d.doc.page.ToGoImage()
-				d.doc.ReleasePageSegments(d.pageIndex)
+				if !d.doc.Grouped {
+					d.doc.ReleasePageSegments(d.pageIndex)
+				}
 				return img, nil
 			}
 			return nil, io.EOF
@@ -211,7 +213,9 @@ func (d *Decoder) Decode() (image.Image, error) {
 			}
 			d.pageIndex++
 			img := d.doc.page.ToGoImage()
-			d.doc.ReleasePageSegments(d.pageIndex)
+			if !d.doc.Grouped {
+				d.doc.ReleasePageSegments(d.pageIndex)
+			}
 			return img, nil
 		}
 		if res == ResultFailure {
@@ -286,117 +290,18 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 // 入参: data 数据
 // 返回: probed 探测后的数据, randomAccess 是否随机访问, littleEndian 是否小端序, orgMode 组织模式, grouped 是否分组
 func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian bool, orgMode int, grouped bool) {
-	if len(data) < 8 || !bytes.HasPrefix(data, jbig2Signature) {
+	if len(data) < 9 || !bytes.HasPrefix(data, jbig2Signature) {
 		return nil, false, false, 0, false
 	}
-	type Config struct {
-		Offset       int
-		RandomAccess bool
-		LittleEndian bool
-		OrgMode      int
-		Grouped      bool
+	offset := 9
+	if (data[8] & 0x02) == 0 {
+		offset = 13
 	}
-	var validConfig *Config
-	bestScore := -1
-	candidates := []Config{
-		{9, true, false, 0, false},
-		{9, false, false, 0, false},
-		{9, true, false, 1, false},
-		{13, false, false, 0, false},
-		{13, false, true, 0, false},
-		{9, false, true, 0, false},
-	}
-	for _, cfg := range candidates {
-		if len(data) <= cfg.Offset+5 {
-			continue
-		}
-		hasPageCount := (data[8] & 0x02) == 0
-		if hasPageCount && cfg.Offset == 9 {
-			continue
-		}
-		if !hasPageCount && cfg.Offset == 13 {
-			continue
-		}
-		hStart := 0
-		var segNum uint32
-		if cfg.OrgMode == 1 || !cfg.RandomAccess {
-			hStart = 4
-			if len(data) <= cfg.Offset+4 {
-				continue
-			}
-			segNum = readUint32(data[cfg.Offset:], cfg.LittleEndian)
-		}
-		if len(data) <= cfg.Offset+hStart {
-			continue
-		}
-		flagsByte := data[cfg.Offset+hStart]
-		hStart++
-		pageAssocSize := (flagsByte & 0x40) != 0
-		if len(data) <= cfg.Offset+hStart {
-			continue
-		}
-		refByte := data[cfg.Offset+hStart]
-		hStart++
-		refCount := int(refByte >> 5)
-		if refCount == 7 {
-			continue
-		}
-		segNumSizeBytes := 1
-		if !cfg.RandomAccess || cfg.OrgMode == 1 {
-			if segNum > 65536 {
-				segNumSizeBytes = 4
-			} else if segNum > 256 {
-				segNumSizeBytes = 2
-			}
-		}
-		if refCount > 0 {
-			hStart += refCount * segNumSizeBytes
-		}
-		if cfg.OrgMode == 1 || !cfg.RandomAccess {
-			if pageAssocSize {
-				hStart += 4
-			} else {
-				hStart += 1
-			}
-		}
-		if len(data) <= cfg.Offset+hStart+3 {
-			continue
-		}
-		dataLen := readUint32(data[cfg.Offset+hStart:], cfg.LittleEndian)
-		remaining := len(data) - (cfg.Offset + hStart + 4)
-		score := 0
-		if int(dataLen) <= remaining {
-			score += 50
-		} else {
-			score -= 80
-		}
-		if dataLen > 0 {
-			score += 10
-		}
-		declaredRandom := (data[8] & 0x01) != 0
-		if cfg.RandomAccess == declaredRandom {
-			score += 10
-		}
-		candidateGrouped := false
-		hSize := hStart + 4
-		gIdx := cfg.Offset + hSize
-		if gIdx+5 < len(data) {
-			nSeg := readUint32(data[gIdx:], false)
-			nType := data[gIdx+4] & 0x3F
-			if nSeg > 0 && nSeg < 1000 && nType <= 62 && nType != 0 {
-				candidateGrouped = true
-				score += 40
-			}
-		}
-		if score > bestScore {
-			bestScore = score
-			validConfig = &Config{cfg.Offset, cfg.RandomAccess, cfg.LittleEndian, cfg.OrgMode, candidateGrouped}
-		}
-	}
-	if validConfig == nil {
+	if len(data) <= offset {
 		return nil, false, false, 0, false
 	}
-	return data[validConfig.Offset:], validConfig.RandomAccess, validConfig.LittleEndian, validConfig.OrgMode, validConfig.Grouped
+	randomAccess = (data[8] & 0x01) == 0
+	return data[offset:], randomAccess, false, 0, randomAccess
 }
 
 func init() {

@@ -39,6 +39,9 @@ type Document struct {
 	pageInfoList  []*PageInfo
 	segment       *Segment
 	offset        uint32
+	groupedOffset uint32
+	groupedIndex  int
+	groupedParsed bool
 	inPage        bool
 	bufSpecified  bool
 	randomAccess  bool
@@ -93,14 +96,10 @@ func NewDocument(data []byte, globalData []byte, randomAccess bool, littleEndian
 // 入参: segment 段对象
 // 返回: Result 结果
 func (d *Document) ParseSegmentHeader(segment *Segment) Result {
-	if d.OrgMode == 1 || !d.randomAccess {
-		if val, err := d.stream.ReadInteger(); err != nil {
-			return ResultFailure
-		} else {
-			segment.Number = val
-		}
+	if val, err := d.stream.ReadInteger(); err != nil {
+		return ResultFailure
 	} else {
-		segment.Number = 0
+		segment.Number = val
 	}
 	var flags byte
 	if val, err := d.stream.Read1Byte(); err != nil {
@@ -173,19 +172,17 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 			}
 		}
 	}
-	if d.OrgMode == 1 || !d.randomAccess {
-		if cPSize == 1 {
-			if val, err := d.stream.Read1Byte(); err != nil {
-				return ResultFailure
-			} else {
-				segment.PageAssociation = uint32(val)
-			}
+	if cPSize == 1 {
+		if val, err := d.stream.Read1Byte(); err != nil {
+			return ResultFailure
 		} else {
-			if val, err := d.stream.ReadInteger(); err != nil {
-				return ResultFailure
-			} else {
-				segment.PageAssociation = val
-			}
+			segment.PageAssociation = uint32(val)
+		}
+	} else {
+		if val, err := d.stream.ReadInteger(); err != nil {
+			return ResultFailure
+		} else {
+			segment.PageAssociation = val
 		}
 	}
 	if val, err := d.stream.ReadInteger(); err != nil {
@@ -319,35 +316,49 @@ func (d *Document) DecodeSequential() Result {
 // decodeGrouped 分组解码
 // 返回: Result 结果
 func (d *Document) decodeGrouped() Result {
-	for d.stream.GetByteLeft() > 0 {
-		seg := NewSegment()
-		ret := d.ParseSegmentHeader(seg)
-		if ret != ResultSuccess {
-			break
+	if !d.groupedParsed {
+		for d.stream.GetByteLeft() > 0 {
+			seg := NewSegment()
+			ret := d.ParseSegmentHeader(seg)
+			if ret != ResultSuccess {
+				break
+			}
+			d.segmentList = append(d.segmentList, seg)
+			if seg.Flags.Type == 51 {
+				break
+			}
 		}
-		d.segmentList = append(d.segmentList, seg)
-		if seg.Flags.Type == 51 {
-			break
-		}
+		d.groupedOffset = d.stream.GetOffset()
+		d.groupedParsed = true
 	}
-	currentDataOffset := d.stream.GetOffset()
-	for _, seg := range d.segmentList {
-		if seg.DataLength == 0 {
+	for d.groupedIndex < len(d.segmentList) {
+		seg := d.segmentList[d.groupedIndex]
+		if seg.Flags.Type == 51 {
+			d.groupedIndex++
+			return ResultEndReached
+		}
+		if seg.DataLength == 0 && seg.Flags.Type != 49 {
+			d.groupedIndex++
 			continue
 		}
-		d.stream.SetOffset(currentDataOffset)
+		d.stream.SetOffset(d.groupedOffset)
 		d.segment = seg
-		d.offset = currentDataOffset
+		d.offset = d.groupedOffset
 		ret := d.ParseSegmentData(seg)
 		if ret == ResultFailure {
 			return ResultFailure
 		}
 		if seg.DataLength != 0xFFFFFFFF {
-			currentDataOffset += seg.DataLength
-			d.stream.SetOffset(currentDataOffset)
+			d.groupedOffset += seg.DataLength
+			d.stream.SetOffset(d.groupedOffset)
+		}
+		d.segment = nil
+		d.groupedIndex++
+		if ret == ResultPageCompleted || ret == ResultEndReached {
+			return ret
 		}
 	}
-	return ResultSuccess
+	return ResultEndReached
 }
 
 // parseSymbolDict 解析符号字典段
