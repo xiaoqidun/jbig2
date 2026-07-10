@@ -16,6 +16,9 @@ package jbig2
 
 import "errors"
 
+// maxHuffmanCodeLength 最大霍夫曼码长
+const maxHuffmanCodeLength = 32
+
 // TableLine 霍夫曼表行定义
 type TableLine struct {
 	PrefLen  int32
@@ -37,9 +40,9 @@ type HuffmanTable struct {
 // huffmanCodeIndex 规范霍夫曼解码索引
 type huffmanCodeIndex struct {
 	maxCodeLen   uint32
-	firstCodes   []uint32
-	codeCounts   []uint32
-	firstIndexes []int
+	firstCodes   [maxHuffmanCodeLength + 1]uint32
+	codeCounts   [maxHuffmanCodeLength + 1]uint32
+	firstIndexes [maxHuffmanCodeLength + 1]int
 	indexes      []int
 }
 
@@ -129,6 +132,9 @@ func (h *HuffmanTable) parseFromCodedBuffer(stream *BitStream) bool {
 		if err != nil {
 			return false
 		}
+		if rangeLength > maxHuffmanCodeLength {
+			return false
+		}
 		h.CODES = append(h.CODES, HuffmanCode{
 			Codelen: int32(prefixLength),
 			Val1:    int32(rangeLength),
@@ -182,16 +188,13 @@ func (h *HuffmanTable) extendBuffers() {
 // 返回: bool 是否成功
 func (h *HuffmanTable) finalize() bool {
 	h.extendBuffers()
-	if err := HuffmanAssignCode(h.CODES); err != nil {
-		h.Ok = false
-		return false
-	}
-	decoder, err := newHuffmanCodeIndex(h.CODES)
+	maxCodeLen, codeCounts, firstCodes, err := huffmanCodeLayout(h.CODES)
 	if err != nil {
 		h.Ok = false
 		return false
 	}
-	h.decoder = decoder
+	assignHuffmanCodes(h.CODES, firstCodes)
+	h.decoder = buildHuffmanCodeIndex(h.CODES, maxCodeLen, codeCounts, firstCodes)
 	h.Ok = true
 	return true
 }
@@ -255,7 +258,14 @@ func HuffmanAssignCode(symcodes []HuffmanCode) error {
 	if err != nil {
 		return err
 	}
-	nextCodes := append([]uint32(nil), firstCodes...)
+	assignHuffmanCodes(symcodes, firstCodes)
+	return nil
+}
+
+// assignHuffmanCodes 分配规范霍夫曼编码
+// 入参: symcodes 霍夫曼编码列表, firstCodes 各码长首码
+func assignHuffmanCodes(symcodes []HuffmanCode, firstCodes [maxHuffmanCodeLength + 1]uint32) {
+	nextCodes := firstCodes
 	for i := range symcodes {
 		length := symcodes[i].Codelen
 		if length <= 0 {
@@ -264,7 +274,6 @@ func HuffmanAssignCode(symcodes []HuffmanCode) error {
 		symcodes[i].Code = int32(nextCodes[length])
 		nextCodes[length]++
 	}
-	return nil
 }
 
 // newHuffmanCodeIndex 创建规范霍夫曼解码索引
@@ -275,14 +284,26 @@ func newHuffmanCodeIndex(codes []HuffmanCode) (*huffmanCodeIndex, error) {
 	if err != nil {
 		return nil, err
 	}
-	firstIndexes := make([]int, maxCodeLen+1)
+	return buildHuffmanCodeIndex(codes, maxCodeLen, codeCounts, firstCodes), nil
+}
+
+// buildHuffmanCodeIndex 构建规范霍夫曼解码索引
+// 入参: codes 霍夫曼编码, maxCodeLen 最大码长, codeCounts 码长数量, firstCodes 首码
+// 返回: *huffmanCodeIndex 解码索引
+func buildHuffmanCodeIndex(
+	codes []HuffmanCode,
+	maxCodeLen uint32,
+	codeCounts [maxHuffmanCodeLength + 1]uint32,
+	firstCodes [maxHuffmanCodeLength + 1]uint32,
+) *huffmanCodeIndex {
+	var firstIndexes [maxHuffmanCodeLength + 1]int
 	total := 0
 	for length := uint32(1); length <= maxCodeLen; length++ {
 		firstIndexes[length] = total
 		total += int(codeCounts[length])
 	}
 	indexes := make([]int, total)
-	nextIndexes := append([]int(nil), firstIndexes...)
+	nextIndexes := firstIndexes
 	for index, code := range codes {
 		if code.Codelen <= 0 {
 			continue
@@ -297,7 +318,7 @@ func newHuffmanCodeIndex(codes []HuffmanCode) (*huffmanCodeIndex, error) {
 		codeCounts:   codeCounts,
 		firstIndexes: firstIndexes,
 		indexes:      indexes,
-	}, nil
+	}
 }
 
 // Decode 解码一个霍夫曼编码索引
@@ -323,29 +344,34 @@ func (h *huffmanCodeIndex) Decode(stream *BitStream) (int, error) {
 
 // huffmanCodeLayout 计算规范霍夫曼编码布局
 // 入参: codes 霍夫曼编码
-// 返回: uint32 最大码长, []uint32 码长数量, []uint32 首码, error 错误信息
-func huffmanCodeLayout(codes []HuffmanCode) (uint32, []uint32, []uint32, error) {
+// 返回: uint32 最大码长, [33]uint32 码长数量, [33]uint32 首码, error 错误信息
+func huffmanCodeLayout(codes []HuffmanCode) (
+	uint32,
+	[maxHuffmanCodeLength + 1]uint32,
+	[maxHuffmanCodeLength + 1]uint32,
+	error,
+) {
+	var codeCounts [maxHuffmanCodeLength + 1]uint32
+	var firstCodes [maxHuffmanCodeLength + 1]uint32
 	var maxCodeLen uint32
 	for _, code := range codes {
-		if code.Codelen < 0 || code.Codelen > 32 {
-			return 0, nil, nil, errors.New("invalid huffman code length")
+		if code.Codelen < 0 || code.Codelen > maxHuffmanCodeLength {
+			return 0, codeCounts, firstCodes, errors.New("invalid huffman code length")
 		}
 		if uint32(code.Codelen) > maxCodeLen {
 			maxCodeLen = uint32(code.Codelen)
 		}
 	}
-	codeCounts := make([]uint32, maxCodeLen+1)
 	for _, code := range codes {
 		if code.Codelen > 0 {
 			codeCounts[code.Codelen]++
 		}
 	}
-	firstCodes := make([]uint32, maxCodeLen+1)
 	var firstCode uint64
 	for length := uint32(1); length <= maxCodeLen; length++ {
 		firstCode = (firstCode + uint64(codeCounts[length-1])) << 1
 		if firstCode+uint64(codeCounts[length]) > uint64(1)<<length {
-			return 0, nil, nil, errors.New("invalid huffman code lengths")
+			return 0, codeCounts, firstCodes, errors.New("invalid huffman code lengths")
 		}
 		firstCodes[length] = uint32(firstCode)
 	}

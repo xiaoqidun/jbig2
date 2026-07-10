@@ -175,11 +175,16 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 		dstY := y + srcY
 		srcX := startX
 		if x&7 == 0 && srcX&7 == 0 {
-			for srcX+8 <= endX {
+			byteCount := (endX - srcX) >> 3
+			if byteCount > 0 {
 				srcIndex := srcY*i.stride + (srcX >> 3)
 				dstIndex := dstY*dst.stride + ((x + srcX) >> 3)
-				dst.data[dstIndex] = composeByte(dst.data[dstIndex], i.data[srcIndex], 0xFF, op)
-				srcX += 8
+				composeBytes(
+					dst.data[dstIndex:dstIndex+byteCount],
+					i.data[srcIndex:srcIndex+byteCount],
+					op,
+				)
+				srcX += byteCount << 3
 			}
 		}
 		for srcX < endX {
@@ -195,6 +200,31 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 			dst.data[dstIndex] = composeByte(dst.data[dstIndex], srcBits, mask, op)
 			srcX += count
 		}
+	}
+}
+
+// composeBytes 组合连续字节
+// 入参: dst 目标数据, src 源数据, op 组合操作
+func composeBytes(dst, src []byte, op ComposeOp) {
+	switch op {
+	case ComposeOr:
+		for idx, value := range src {
+			dst[idx] |= value
+		}
+	case ComposeAnd:
+		for idx, value := range src {
+			dst[idx] &= value
+		}
+	case ComposeXor:
+		for idx, value := range src {
+			dst[idx] ^= value
+		}
+	case ComposeXnor:
+		for idx, value := range src {
+			dst[idx] = ^(dst[idx] ^ value)
+		}
+	case ComposeReplace:
+		copy(dst, src)
 	}
 }
 

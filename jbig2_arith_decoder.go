@@ -203,13 +203,13 @@ func (ad *ArithDecoder) readValueA() {
 
 // ArithIntDecoder 算术整数解码器
 type ArithIntDecoder struct {
-	iax []ArithCtx
+	iax [512]ArithCtx
 }
 
 // NewArithIntDecoder 创建新的算术整数解码器
 // 返回: *ArithIntDecoder 解码器对象
 func NewArithIntDecoder() *ArithIntDecoder {
-	return &ArithIntDecoder{iax: make([]ArithCtx, 512)}
+	return &ArithIntDecoder{}
 }
 
 // Decode 解码

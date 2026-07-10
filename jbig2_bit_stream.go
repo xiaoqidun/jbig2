@@ -187,8 +187,7 @@ func (b *BitStream) ReadShortInteger() (uint16, error) {
 // AlignByte 字节对齐
 func (b *BitStream) AlignByte() {
 	if b.bitIdx != 0 {
-		b.AddOffset(1)
-		b.bitIdx = 0
+		b.IncByteIdx()
 	}
 }
 
@@ -203,7 +202,13 @@ func (b *BitStream) GetCurByte() uint8 {
 
 // IncByteIdx 增加字节索引
 func (b *BitStream) IncByteIdx() {
-	b.AddOffset(1)
+	size := uint32(len(b.data))
+	if b.byteIdx < size {
+		b.byteIdx++
+	} else {
+		b.byteIdx = size
+	}
+	b.bitIdx = 0
 }
 
 // GetCurByteArith 获取算术解码当前字节
