@@ -29,9 +29,6 @@ type BitStream struct {
 // 入参: data 数据源, key 键值
 // 返回: *BitStream 位流对象
 func NewBitStream(data []byte, key uint64) *BitStream {
-	if len(data) > 256*1024*1024 {
-		data = nil
-	}
 	return &BitStream{data: data, key: key}
 }
 
@@ -68,26 +65,64 @@ func (b *BitStream) ReadNBits(bits uint32) (uint32, error) {
 	if bits > 32 {
 		return 0, errors.New("too many bits requested")
 	}
-	if !b.IsInBounds() {
-		return 0, errors.New("out of bounds")
+	if bits == 0 {
+		return 0, nil
 	}
-	bitPos := b.GetBitPos()
-	lengthInBits := b.lengthInBits()
-	if bitPos > lengthInBits {
-		return 0, errors.New("bit position out of range")
-	}
-	var bitsToRead uint32
-	if bitPos+bits <= lengthInBits {
-		bitsToRead = bits
-	} else {
-		bitsToRead = lengthInBits - bitPos
+	bitPos := uint64(b.byteIdx)*8 + uint64(b.bitIdx)
+	if bitPos+uint64(bits) > uint64(len(b.data))*8 {
+		return 0, errors.New("insufficient data")
 	}
 	var result uint32
-	for i := uint32(0); i < bitsToRead; i++ {
-		result = (result << 1) | uint32((b.data[b.byteIdx]>>(7-b.bitIdx))&0x01)
-		b.advanceBit()
+	for bits > 0 {
+		available := uint32(8 - b.bitIdx)
+		count := bits
+		if count > available {
+			count = available
+		}
+		shift := available - count
+		mask := uint32(1<<count) - 1
+		result = (result << count) | (uint32(b.data[b.byteIdx]>>shift) & mask)
+		b.bitIdx += count
+		if b.bitIdx == 8 {
+			b.byteIdx++
+			b.bitIdx = 0
+		}
+		bits -= count
 	}
 	return result, nil
+}
+
+// peekNBits 窥视指定位数并在末尾补零
+// 入参: bits 位数
+// 返回: uint32 结果
+func (b *BitStream) peekNBits(bits uint32) uint32 {
+	bitPos := uint64(b.byteIdx)*8 + uint64(b.bitIdx)
+	available := uint64(len(b.data))*8 - bitPos
+	count := bits
+	if uint64(count) > available {
+		count = uint32(available)
+	}
+	byteIdx := b.byteIdx
+	bitIdx := b.bitIdx
+	remaining := count
+	var result uint32
+	for remaining > 0 {
+		byteBits := uint32(8 - bitIdx)
+		read := remaining
+		if read > byteBits {
+			read = byteBits
+		}
+		shift := byteBits - read
+		mask := uint32(1<<read) - 1
+		result = (result << read) | (uint32(b.data[byteIdx]>>shift) & mask)
+		bitIdx += read
+		if bitIdx == 8 {
+			byteIdx++
+			bitIdx = 0
+		}
+		remaining -= read
+	}
+	return result << (bits - count)
 }
 
 // ReadNBitsInt32 读取指定位数的有符号整数
@@ -275,10 +310,4 @@ func (b *BitStream) advanceBit() {
 	} else {
 		b.bitIdx++
 	}
-}
-
-// lengthInBits 获取总位数
-// 返回: uint32 总位数
-func (b *BitStream) lengthInBits() uint32 {
-	return uint32(len(b.data)) * 8
 }

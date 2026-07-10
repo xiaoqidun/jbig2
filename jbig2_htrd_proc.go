@@ -51,23 +51,20 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 			return nil, errors.New("failed to create skip image")
 		}
 		for mg := uint32(0); mg < h.HGH; mg++ {
+			xPosition := int64(h.HGX) + int64(mg)*int64(h.HRY)
+			yPosition := int64(h.HGY) + int64(mg)*int64(h.HRX)
 			for ng := uint32(0); ng < h.HGW; ng++ {
-				mgInt := int64(mg)
-				ngInt := int64(ng)
-				x := (int64(h.HGX) + mgInt*int64(h.HRY) + ngInt*int64(h.HRX)) >> 8
-				y := (int64(h.HGY) + mgInt*int64(h.HRX) - ngInt*int64(h.HRY)) >> 8
+				x := xPosition >> 8
+				y := yPosition >> 8
 				if (x+int64(h.HPW) <= 0) || (x >= int64(h.HBW)) || (y+int64(h.HPH) <= 0) || (y >= int64(h.HBH)) {
 					hSkip.SetPixel(int32(ng), int32(mg), 1)
-				} else {
-					hSkip.SetPixel(int32(ng), int32(mg), 0)
 				}
+				xPosition += int64(h.HRX)
+				yPosition -= int64(h.HRY)
 			}
 		}
 	}
-	hbpp := uint32(1)
-	for (uint32(1) << hbpp) < h.HNUMPATS {
-		hbpp++
-	}
+	hbpp := ceilLog2(h.HNUMPATS)
 	grd := NewGRDProc()
 	grd.MMR = h.HMMR
 	grd.GBW = h.HGW
@@ -118,12 +115,12 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 // 入参: stream 位流
 // 返回: *Image 半色调区域图像, error 错误信息
 func (h *HTRDProc) DecodeMMR(stream *BitStream) (*Image, error) {
-	hbpp := uint32(1)
-	for (uint32(1) << hbpp) < h.HNUMPATS {
-		hbpp++
-	}
+	hbpp := ceilLog2(h.HNUMPATS)
 	gsbpp := int(hbpp)
 	gsplanes := make([]*Image, gsbpp)
+	if gsbpp == 0 {
+		return h.decodeImage(gsplanes)
+	}
 	j := gsbpp - 1
 	decoder := NewMMRDecompressor(int(h.HGW), int(h.HGH), stream)
 	pImage, err := decoder.Uncompress()
@@ -152,8 +149,12 @@ func (h *HTRDProc) decodeImage(gsplanes []*Image) (*Image, error) {
 	if htReg == nil {
 		return nil, errors.New("failed to create target image")
 	}
-	htReg.Fill(h.HDEFPIXEL)
+	if h.HDEFPIXEL {
+		htReg.Fill(true)
+	}
 	for mg := uint32(0); mg < h.HGH; mg++ {
+		xPosition := int64(h.HGX) + int64(mg)*int64(h.HRY)
+		yPosition := int64(h.HGY) + int64(mg)*int64(h.HRX)
 		for ng := uint32(0); ng < h.HGW; ng++ {
 			gsval := uint32(0)
 			for i := 0; i < len(gsplanes); i++ {
@@ -164,14 +165,14 @@ func (h *HTRDProc) decodeImage(gsplanes []*Image) (*Image, error) {
 			if patIndex >= h.HNUMPATS {
 				patIndex = h.HNUMPATS - 1
 			}
-			mgInt := int64(mg)
-			ngInt := int64(ng)
-			x := (int64(h.HGX) + mgInt*int64(h.HRY) + ngInt*int64(h.HRX)) >> 8
-			y := (int64(h.HGY) + mgInt*int64(h.HRX) - ngInt*int64(h.HRY)) >> 8
+			x := xPosition >> 8
+			y := yPosition >> 8
 			pat := h.HPATS[patIndex]
 			if pat != nil {
 				pat.ComposeTo(htReg, int32(x), int32(y), h.HCOMBOP)
 			}
+			xPosition += int64(h.HRX)
+			yPosition -= int64(h.HRY)
 		}
 	}
 	return htReg, nil

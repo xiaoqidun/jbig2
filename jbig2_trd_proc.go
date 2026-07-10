@@ -151,8 +151,14 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 	if sbReg == nil {
 		return nil, errors.New("failed to create text region image")
 	}
-	sbReg.Fill(t.SBDEFPIXEL)
+	if t.SBDEFPIXEL {
+		sbReg.Fill(true)
+	}
 	decoder := NewHuffmanDecoder(stream)
+	symbolDecoder, err := newHuffmanCodeIndex(t.SBSYMCODES)
+	if err != nil {
+		return nil, err
+	}
 	var initialStript int32
 	if res := decoder.DecodeAValue(t.SBHUFFDT, &initialStript); res != 0 {
 		return nil, errors.New("huffman decode failed for sbhuffdt")
@@ -206,26 +212,13 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 				CURT = int32(val)
 			}
 			TI := int32(STRIPT + int64(CURT))
-			nSafeVal := int32(0)
-			nBits := 0
-			IDI := uint32(0)
-			for {
-				var nTmp uint32
-				val, err := stream.Read1Bit()
-				if err != nil {
-					return nil, errors.New("read 1 bit failed")
-				}
-				nTmp = val
-				nSafeVal = (nSafeVal << 1) | int32(nTmp)
-				nBits++
-				for IDI = 0; IDI < t.SBNUMSYMS; IDI++ {
-					if int32(nBits) == t.SBSYMCODES[IDI].Codelen && nSafeVal == int32(t.SBSYMCODES[IDI].Code) {
-						break
-					}
-				}
-				if IDI < t.SBNUMSYMS {
-					break
-				}
+			symbolIndex, err := symbolDecoder.Decode(stream)
+			if err != nil {
+				return nil, errors.New("failed to decode symbol id")
+			}
+			IDI := uint32(symbolIndex)
+			if IDI >= t.SBNUMSYMS {
+				return nil, errors.New("symbol id out of bounds")
 			}
 			var RI uint32 = 0
 			if t.SBREFINE {
@@ -354,7 +347,9 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 	if sbReg == nil {
 		return nil, errors.New("failed to create text region image")
 	}
-	sbReg.Fill(t.SBDEFPIXEL)
+	if t.SBDEFPIXEL {
+		sbReg.Fill(true)
+	}
 	var initialStript int32
 	if res, ok := pIADT.Decode(arithDecoder); !ok {
 		return nil, errors.New("failed to decode initial stript")

@@ -33,24 +33,11 @@ func DecodeG4(stream *BitStream, image *Image) error {
 	}
 	reader := bytes.NewReader(data)
 	opts := &ccitt.Options{
-		Invert: false,
+		Invert: true,
 	}
 	decoder := ccitt.NewReader(reader, ccitt.MSB, ccitt.Group4, int(image.Width()), int(image.Height()), opts)
-	width := int(image.Width())
-	height := int(image.Height())
-	rowBytes := (width + 7) / 8
-	buf := make([]byte, rowBytes)
-	imgData := image.Data()
-	stride := int(image.Stride())
-	for y := 0; y < height; y++ {
-		if _, err := io.ReadFull(decoder, buf); err != nil {
-			return err
-		}
-		start := y * stride
-		if start+rowBytes > len(imgData) {
-			return errors.New("image buffer too small")
-		}
-		copy(imgData[start:start+rowBytes], buf)
+	if _, err := io.ReadFull(decoder, image.Data()); err != nil {
+		return err
 	}
 	consumed := int64(len(data)) - int64(reader.Len())
 	stream.AddOffset(uint32(consumed))

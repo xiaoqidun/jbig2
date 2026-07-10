@@ -14,6 +14,8 @@
 
 package jbig2
 
+import "errors"
+
 // TableLine 霍夫曼表行定义
 type TableLine struct {
 	PrefLen  int32
@@ -29,6 +31,16 @@ type HuffmanTable struct {
 	RANGELEN []int32
 	RANGELOW []int32
 	Ok       bool
+	decoder  *huffmanCodeIndex
+}
+
+// huffmanCodeIndex 规范霍夫曼解码索引
+type huffmanCodeIndex struct {
+	maxCodeLen   uint32
+	firstCodes   []uint32
+	codeCounts   []uint32
+	firstIndexes []int
+	indexes      []int
 }
 
 // NewStandardTable 从标准表创建霍夫曼表
@@ -83,13 +95,7 @@ func (h *HuffmanTable) parseFromStandardTable(idx int) bool {
 		h.CODES[i].Val1 = def.Lines[i].RangeLen
 		h.CODES[i].Val2 = def.Lines[i].RangeLow
 	}
-	h.extendBuffers(false)
-	if err := HuffmanAssignCode(h.CODES); err != nil {
-		h.Ok = false
-	} else {
-		h.Ok = true
-	}
-	return h.Ok
+	return h.finalize()
 }
 
 // parseFromCodedBuffer 从编码位流解析
@@ -159,24 +165,35 @@ func (h *HuffmanTable) parseFromCodedBuffer(stream *BitStream) bool {
 		})
 	}
 	h.NTEMP = uint32(len(h.CODES))
-	h.extendBuffers(false)
-	if err := HuffmanAssignCode(h.CODES); err != nil {
-		h.Ok = false
-	} else {
-		h.Ok = true
-	}
-	return h.Ok
+	return h.finalize()
 }
 
 // extendBuffers 扩展内部缓冲区
-// 入参: increment 是否增量
-func (h *HuffmanTable) extendBuffers(increment bool) {
+func (h *HuffmanTable) extendBuffers() {
 	h.RANGELEN = make([]int32, len(h.CODES))
 	h.RANGELOW = make([]int32, len(h.CODES))
 	for i := range h.CODES {
 		h.RANGELEN[i] = h.CODES[i].Val1
 		h.RANGELOW[i] = h.CODES[i].Val2
 	}
+}
+
+// finalize 完成霍夫曼表构建
+// 返回: bool 是否成功
+func (h *HuffmanTable) finalize() bool {
+	h.extendBuffers()
+	if err := HuffmanAssignCode(h.CODES); err != nil {
+		h.Ok = false
+		return false
+	}
+	decoder, err := newHuffmanCodeIndex(h.CODES)
+	if err != nil {
+		h.Ok = false
+		return false
+	}
+	h.decoder = decoder
+	h.Ok = true
+	return true
 }
 
 // HuffmanDecoder 霍夫曼解码器
@@ -195,76 +212,144 @@ func NewHuffmanDecoder(stream *BitStream) *HuffmanDecoder {
 // 入参: table 霍夫曼表, result 结果指针
 // 返回: int 状态码
 func (h *HuffmanDecoder) DecodeAValue(table *HuffmanTable, result *int32) int {
-	var val int32
-	var nBits int
-	for {
-		if nBits > 32 {
-			return -1
-		}
-		bit, err := h.stream.Read1Bit()
+	if table.decoder == nil {
+		decoder, err := newHuffmanCodeIndex(table.CODES)
 		if err != nil {
 			return -1
 		}
-		val = (val << 1) | int32(bit)
-		nBits++
-		for i := 0; i < len(table.CODES); i++ {
-			if table.CODES[i].Codelen == int32(nBits) && table.CODES[i].Code == val {
-				if table.HTOOB && i == len(table.CODES)-1 {
-					return JBig2OOB
-				}
-				rlen := table.RANGELEN[i]
-				rlow := table.RANGELOW[i]
-				if rlen < 0 {
-					return JBig2OOB
-				}
-				if rlen > 0 {
-					offset, err := h.stream.ReadNBits(uint32(rlen))
-					if err != nil {
-						return -1
-					}
-					if table.CODES[i].LowerRange {
-						*result = rlow - int32(offset)
-					} else {
-						*result = rlow + int32(offset)
-					}
-				} else {
-					*result = rlow
-				}
-				return 0
-			}
-		}
+		table.decoder = decoder
 	}
+	i, err := table.decoder.Decode(h.stream)
+	if err != nil {
+		return -1
+	}
+	if table.HTOOB && i == len(table.CODES)-1 {
+		return JBig2OOB
+	}
+	rlen := table.CODES[i].Val1
+	rlow := table.CODES[i].Val2
+	if rlen < 0 {
+		return JBig2OOB
+	}
+	if rlen > 0 {
+		offset, err := h.stream.ReadNBits(uint32(rlen))
+		if err != nil {
+			return -1
+		}
+		if table.CODES[i].LowerRange {
+			*result = rlow - int32(offset)
+		} else {
+			*result = rlow + int32(offset)
+		}
+	} else {
+		*result = rlow
+	}
+	return 0
 }
 
 // HuffmanAssignCode 为霍夫曼表分配编码
 // 入参: symcodes 霍夫曼编码列表
 // 返回: error 错误信息
 func HuffmanAssignCode(symcodes []HuffmanCode) error {
-	lenMax := int32(0)
-	for _, sc := range symcodes {
-		if sc.Codelen > lenMax {
-			lenMax = sc.Codelen
-		}
+	_, _, firstCodes, err := huffmanCodeLayout(symcodes)
+	if err != nil {
+		return err
 	}
-	lenCounts := make([]int, lenMax+1)
-	firstCodes := make([]int32, lenMax+1)
-	for _, sc := range symcodes {
-		if sc.Codelen > 0 {
-			lenCounts[sc.Codelen]++
+	nextCodes := append([]uint32(nil), firstCodes...)
+	for i := range symcodes {
+		length := symcodes[i].Codelen
+		if length <= 0 {
+			continue
 		}
-	}
-	lenCounts[0] = 0
-	for i := int32(1); i <= lenMax; i++ {
-		firstCodes[i] = (firstCodes[i-1] + int32(lenCounts[i-1])) << 1
-		curCode := firstCodes[i]
-		for j := range symcodes {
-			if symcodes[j].Codelen == i {
-				symcodes[j].Code = curCode
-				curCode++
-			}
-		}
+		symcodes[i].Code = int32(nextCodes[length])
+		nextCodes[length]++
 	}
 	return nil
+}
+
+// newHuffmanCodeIndex 创建规范霍夫曼解码索引
+// 入参: codes 霍夫曼编码
+// 返回: *huffmanCodeIndex 解码索引, error 错误信息
+func newHuffmanCodeIndex(codes []HuffmanCode) (*huffmanCodeIndex, error) {
+	maxCodeLen, codeCounts, firstCodes, err := huffmanCodeLayout(codes)
+	if err != nil {
+		return nil, err
+	}
+	firstIndexes := make([]int, maxCodeLen+1)
+	total := 0
+	for length := uint32(1); length <= maxCodeLen; length++ {
+		firstIndexes[length] = total
+		total += int(codeCounts[length])
+	}
+	indexes := make([]int, total)
+	nextIndexes := append([]int(nil), firstIndexes...)
+	for index, code := range codes {
+		if code.Codelen <= 0 {
+			continue
+		}
+		length := uint32(code.Codelen)
+		indexes[nextIndexes[length]] = index
+		nextIndexes[length]++
+	}
+	return &huffmanCodeIndex{
+		maxCodeLen:   maxCodeLen,
+		firstCodes:   firstCodes,
+		codeCounts:   codeCounts,
+		firstIndexes: firstIndexes,
+		indexes:      indexes,
+	}, nil
+}
+
+// Decode 解码一个霍夫曼编码索引
+// 入参: stream 位流
+// 返回: int 编码索引, error 错误信息
+func (h *huffmanCodeIndex) Decode(stream *BitStream) (int, error) {
+	var code uint32
+	for length := uint32(1); length <= h.maxCodeLen; length++ {
+		bit, err := stream.Read1Bit()
+		if err != nil {
+			return 0, err
+		}
+		code = (code << 1) | bit
+		count := h.codeCounts[length]
+		firstCode := h.firstCodes[length]
+		if code >= firstCode && code-firstCode < count {
+			index := h.firstIndexes[length] + int(code-firstCode)
+			return h.indexes[index], nil
+		}
+	}
+	return 0, errors.New("invalid huffman code")
+}
+
+// huffmanCodeLayout 计算规范霍夫曼编码布局
+// 入参: codes 霍夫曼编码
+// 返回: uint32 最大码长, []uint32 码长数量, []uint32 首码, error 错误信息
+func huffmanCodeLayout(codes []HuffmanCode) (uint32, []uint32, []uint32, error) {
+	var maxCodeLen uint32
+	for _, code := range codes {
+		if code.Codelen < 0 || code.Codelen > 32 {
+			return 0, nil, nil, errors.New("invalid huffman code length")
+		}
+		if uint32(code.Codelen) > maxCodeLen {
+			maxCodeLen = uint32(code.Codelen)
+		}
+	}
+	codeCounts := make([]uint32, maxCodeLen+1)
+	for _, code := range codes {
+		if code.Codelen > 0 {
+			codeCounts[code.Codelen]++
+		}
+	}
+	firstCodes := make([]uint32, maxCodeLen+1)
+	var firstCode uint64
+	for length := uint32(1); length <= maxCodeLen; length++ {
+		firstCode = (firstCode + uint64(codeCounts[length-1])) << 1
+		if firstCode+uint64(codeCounts[length]) > uint64(1)<<length {
+			return 0, nil, nil, errors.New("invalid huffman code lengths")
+		}
+		firstCodes[length] = uint32(firstCode)
+	}
+	return maxCodeLen, codeCounts, firstCodes, nil
 }
 
 // standardTableDef 标准表定义

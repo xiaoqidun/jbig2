@@ -67,6 +67,33 @@ func (i *Image) Data() []byte {
 	return i.data
 }
 
+// row 获取图像行数据
+// 入参: y 纵坐标
+// 返回: []byte 行数据
+func (i *Image) row(y int32) []byte {
+	if y < 0 || y >= i.height {
+		return nil
+	}
+	start := y * i.stride
+	return i.data[start : start+i.stride]
+}
+
+// getPixelFromRow 获取行内像素
+// 入参: row 行数据, x 横坐标, width 行宽度
+// 返回: uint32 像素值
+func getPixelFromRow(row []byte, x, width int32) uint32 {
+	if row == nil || uint32(x) >= uint32(width) {
+		return 0
+	}
+	return uint32((row[x>>3] >> uint(7-(x&7))) & 1)
+}
+
+// setPixelInRow 设置行内前景像素
+// 入参: row 行数据, x 横坐标
+func setPixelInRow(row []byte, x int32) {
+	row[x>>3] |= 1 << uint(7-(x&7))
+}
+
 // GetPixel 获取像素值
 // 入参: x 轴坐标, y 轴坐标
 // 返回: int 像素值
@@ -98,12 +125,12 @@ func (i *Image) SetPixel(x, y int32, v int) {
 // Fill 填充图像
 // 入参: v 填充值
 func (i *Image) Fill(v bool) {
-	var val byte
-	if v {
-		val = 0xFF
+	if !v {
+		clear(i.data)
+		return
 	}
 	for idx := range i.data {
-		i.data[idx] = val
+		i.data[idx] = 0xFF
 	}
 }
 
@@ -118,6 +145,9 @@ func (i *Image) Invert() {
 // 入参: dst 目标图像, x 轴坐标, y 轴坐标, op 组合操作
 func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	if i == nil || dst == nil {
+		return
+	}
+	if op < ComposeOr || op > ComposeReplace {
 		return
 	}
 	srcX0 := int64(0)
@@ -139,34 +169,66 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	if srcX0 >= srcX1 || srcY0 >= srcY1 {
 		return
 	}
-	for h := int32(srcY0); h < int32(srcY1); h++ {
-		for w := int32(srcX0); w < int32(srcX1); w++ {
-			dstX := x + w
-			dstY := y + h
-			srcBit := i.GetPixel(w, h)
-			dstBit := dst.GetPixel(dstX, dstY)
-			var resBit int
-			switch op {
-			case ComposeOr:
-				resBit = dstBit | srcBit
-			case ComposeAnd:
-				resBit = dstBit & srcBit
-			case ComposeXor:
-				resBit = dstBit ^ srcBit
-			case ComposeXnor:
-				if dstBit == srcBit {
-					resBit = 1
-				} else {
-					resBit = 0
-				}
-			case ComposeReplace:
-				resBit = srcBit
-			default:
-				resBit = dstBit
+	startX := int32(srcX0)
+	endX := int32(srcX1)
+	for srcY := int32(srcY0); srcY < int32(srcY1); srcY++ {
+		dstY := y + srcY
+		srcX := startX
+		if x&7 == 0 && srcX&7 == 0 {
+			for srcX+8 <= endX {
+				srcIndex := srcY*i.stride + (srcX >> 3)
+				dstIndex := dstY*dst.stride + ((x + srcX) >> 3)
+				dst.data[dstIndex] = composeByte(dst.data[dstIndex], i.data[srcIndex], 0xFF, op)
+				srcX += 8
 			}
-			dst.SetPixel(dstX, dstY, resBit)
+		}
+		for srcX < endX {
+			dstX := x + srcX
+			count := int32(8 - (dstX & 7))
+			if remaining := endX - srcX; count > remaining {
+				count = remaining
+			}
+			shift := uint(8 - (dstX & 7) - count)
+			mask := byte((uint16(1<<count) - 1) << shift)
+			srcBits := i.readBits(srcX, srcY, count) << shift
+			dstIndex := dstY*dst.stride + (dstX >> 3)
+			dst.data[dstIndex] = composeByte(dst.data[dstIndex], srcBits, mask, op)
+			srcX += count
 		}
 	}
+}
+
+// readBits 读取同一行内最多8位
+// 入参: x 横坐标, y 纵坐标, count 位数
+// 返回: byte 位数据
+func (i *Image) readBits(x, y, count int32) byte {
+	index := y*i.stride + (x >> 3)
+	shift := x & 7
+	bits := uint16(i.data[index]) << 8
+	if shift+count > 8 {
+		bits |= uint16(i.data[index+1])
+	}
+	return byte(bits >> uint(16-shift-count))
+}
+
+// composeByte 组合一个字节中的有效位
+// 入参: dst 目标数据, src 源数据, mask 有效位, op 组合操作
+// 返回: byte 组合结果
+func composeByte(dst, src, mask byte, op ComposeOp) byte {
+	var result byte
+	switch op {
+	case ComposeOr:
+		result = dst | src
+	case ComposeAnd:
+		result = dst & src
+	case ComposeXor:
+		result = dst ^ src
+	case ComposeXnor:
+		result = ^(dst ^ src)
+	case ComposeReplace:
+		result = src
+	}
+	return (dst &^ mask) | (result & mask)
 }
 
 // ComposeFrom 从源图像组合到当前图像
@@ -188,35 +250,37 @@ func (i *Image) SubImage(x, y, w, h int32) *Image {
 	if sub == nil {
 		return nil
 	}
-	sub.Fill(false)
-	for r := int32(0); r < h; r++ {
-		for c := int32(0); c < w; c++ {
-			sub.SetPixel(c, r, i.GetPixel(x+c, y+r))
-		}
-	}
+	i.ComposeTo(sub, -x, -y, ComposeReplace)
 	return sub
 }
 
 // Expand 扩展图像高度
 // 入参: height 新高度, defaultPixel 默认填充值
 func (i *Image) Expand(height int32, defaultPixel bool) {
-	if height <= i.height {
+	if height <= i.height || height > 2147483647/i.stride {
 		return
 	}
-	newStride := i.stride
-	newHeight := height
-	newData := make([]byte, newStride*newHeight)
-	copy(newData, i.data)
-	start := i.stride * i.height
-	fill := byte(0x00)
+	oldSize := len(i.data)
+	newSize := int(i.stride * height)
+	if newSize > cap(i.data) {
+		capacity := cap(i.data) * 2
+		if capacity < newSize {
+			capacity = newSize
+		}
+		newData := make([]byte, newSize, capacity)
+		copy(newData, i.data)
+		i.data = newData
+	} else {
+		i.data = i.data[:newSize]
+	}
 	if defaultPixel {
-		fill = 0xFF
+		for idx := oldSize; idx < newSize; idx++ {
+			i.data[idx] = 0xFF
+		}
+	} else {
+		clear(i.data[oldSize:newSize])
 	}
-	for j := start; j < int32(len(newData)); j++ {
-		newData[j] = fill
-	}
-	i.data = newData
-	i.height = newHeight
+	i.height = height
 }
 
 // Duplicate 复制图像

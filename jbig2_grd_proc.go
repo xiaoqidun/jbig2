@@ -55,13 +55,16 @@ func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2Segm
 	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
 		return JBig2SegmentError
 	}
-	if *state.Image == nil {
+	created := *state.Image == nil
+	if created {
 		*state.Image = NewImage(int32(g.GBW), int32(g.GBH))
 	}
 	if *state.Image == nil {
 		return JBig2SegmentError
 	}
-	(*state.Image).Fill(false)
+	if !created {
+		(*state.Image).Fill(false)
+	}
 	g.decodeType = 1
 	g.ltp = 0
 	g.line = nil
@@ -82,10 +85,6 @@ func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentS
 	}
 	if err := DecodeG4(stream, *image); err != nil {
 		return JBig2SegmentError
-	}
-	data := (*image).Data()
-	for i := range data {
-		data[i] = ^data[i]
 	}
 	g.replaceRect = Rect{0, 0, int32((*image).Width()), int32((*image).Height())}
 	return JBig2SegmentParseComplete
@@ -168,17 +167,17 @@ func (g *GRDProc) ProgressiveDecodeArith(state *ProgressiveArithDecodeState) JBi
 func (g *GRDProc) useTemplate0Opt3() bool {
 	return g.GBAT[0] == 3 && g.GBAT[1] == -1 && g.GBAT[2] == -3 &&
 		g.GBAT[3] == -1 && g.GBAT[4] == 2 && g.GBAT[5] == -2 &&
-		g.GBAT[6] == -2 && g.GBAT[7] == -2 && !g.USESKIP
+		g.GBAT[6] == -2 && g.GBAT[7] == -2
 }
 
 // useTemplate1Opt3 检查是否可用模板1优化3
 // 返回: bool 是否可用
 func (g *GRDProc) useTemplate1Opt3() bool {
-	return g.GBAT[0] == 3 && g.GBAT[1] == -1 && !g.USESKIP
+	return g.GBAT[0] == 3 && g.GBAT[1] == -1
 }
 
 // useTemplate23Opt3 检查是否可用模板23优化3
 // 返回: bool 是否可用
 func (g *GRDProc) useTemplate23Opt3() bool {
-	return g.GBAT[0] == 2 && g.GBAT[1] == -1 && !g.USESKIP
+	return g.GBAT[0] == 2 && g.GBAT[1] == -1
 }

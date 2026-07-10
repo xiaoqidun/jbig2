@@ -155,11 +155,9 @@ func createLittleEndianTable(codes [][]int) []*mmrCode {
 
 // MMRDecompressor MMR 解码器
 type MMRDecompressor struct {
-	width      int
-	height     int
-	stream     *BitStream
-	lastCode   int
-	lastOffset int
+	width  int
+	height int
+	stream *BitStream
 }
 
 // NewMMRDecompressor 创建新的 MMR 解码器
@@ -167,10 +165,9 @@ type MMRDecompressor struct {
 // 返回: *MMRDecompressor 解码器对象
 func NewMMRDecompressor(width, height int, stream *BitStream) *MMRDecompressor {
 	return &MMRDecompressor{
-		width:      width,
-		height:     height,
-		stream:     stream,
-		lastOffset: -1,
+		width:  width,
+		height: height,
+		stream: stream,
 	}
 }
 
@@ -194,18 +191,11 @@ func (m *MMRDecompressor) getNextCode(table []*mmrCode) (*mmrCode, error) {
 // getNextCodeWord 获取下一个编码字
 // 返回: int 编码字, error 错误信息
 func (m *MMRDecompressor) getNextCodeWord() (int, error) {
-	offset := int(m.stream.GetBitPos())
-	if offset != m.lastOffset {
-		savedBitPos := m.stream.GetBitPos()
-		val, err := m.stream.ReadNBits(24)
-		if err != nil {
-			return 0, err
-		}
-		m.stream.SetBitPos(savedBitPos)
-		m.lastCode = int(val)
-		m.lastOffset = offset
+	if !m.stream.IsInBounds() {
+		return 0, errors.New("insufficient mmr data")
 	}
-	return m.lastCode, nil
+	const tableBits = firstLevelTableSize + secondLevelTableSize
+	return int(m.stream.peekNBits(tableBits)) << (codeOffset - tableBits), nil
 }
 
 // Uncompress 解压缩图像
@@ -215,7 +205,6 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	if img == nil {
 		return nil, errors.New("failed to create image")
 	}
-	img.Fill(false)
 	currOffsets := make([]int, m.width+5)
 	refOffsets := make([]int, m.width+5)
 	refOffsets[0] = m.width
@@ -231,7 +220,7 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 		if count > 0 {
 			m.fillBitmap(img, y, currOffsets, count)
 		}
-		copy(refOffsets, currOffsets)
+		refOffsets, currOffsets = currOffsets, refOffsets
 		refRunLength = count
 	}
 	m.detectAndSkipEOL()
@@ -293,6 +282,9 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 					}
 				}
 				bitPos += run
+				if bitPos > m.width {
+					return 0, errors.New("mmr run exceeds width")
+				}
 				currOffsets[currIdx] = bitPos
 				currIdx++
 			}
@@ -317,18 +309,19 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		default:
 			return 0, errors.New("unsupported mmr mode")
 		}
-		if bitPos <= m.width {
-			currOffsets[currIdx] = bitPos
-			currIdx++
-			whiteRun = !whiteRun
-			if refIdx > 0 {
-				refIdx--
-			} else {
-				refIdx++
-			}
-			for bitPos < m.width && refOffsets[refIdx] <= bitPos {
-				refIdx += 2
-			}
+		if bitPos < 0 || bitPos > m.width {
+			return 0, errors.New("mmr offset out of bounds")
+		}
+		currOffsets[currIdx] = bitPos
+		currIdx++
+		whiteRun = !whiteRun
+		if refIdx > 0 {
+			refIdx--
+		} else {
+			refIdx++
+		}
+		for bitPos < m.width && refOffsets[refIdx] <= bitPos {
+			refIdx += 2
 		}
 	}
 	if currIdx == 0 || currOffsets[currIdx-1] != m.width {
@@ -341,16 +334,22 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 // fillBitmap 填充图像位图
 // 入参: img 图像对象, y 轴坐标, offsets 偏移集合, count 计数
 func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int) {
-	x := 0
-	for i := 0; i < count; i++ {
-		target := offsets[i]
-		val := byte(0)
-		if i%2 != 0 {
-			val = 1
+	data := img.Data()
+	row := y * int(img.Stride())
+	for i := 1; i < count; i += 2 {
+		start := offsets[i-1]
+		end := offsets[i]
+		for start < end && start&7 != 0 {
+			data[row+(start>>3)] |= 1 << uint(7-(start&7))
+			start++
 		}
-		for x < target && x < m.width {
-			img.SetPixel(int32(x), int32(y), int(val))
-			x++
+		for start+8 <= end {
+			data[row+(start>>3)] = 0xFF
+			start += 8
+		}
+		for start < end {
+			data[row+(start>>3)] |= 1 << uint(7-(start&7))
+			start++
 		}
 	}
 }

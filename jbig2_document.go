@@ -278,7 +278,7 @@ func (d *Document) DecodeSequential() Result {
 			ret := d.ParseSegmentHeader(d.segment)
 			if ret != ResultSuccess {
 				d.segment = nil
-				break
+				return ret
 			}
 			d.offset = d.stream.GetOffset()
 		}
@@ -286,7 +286,7 @@ func (d *Document) DecodeSequential() Result {
 		if ret == ResultEndReached {
 			d.segmentList = append(d.segmentList, d.segment)
 			d.segment = nil
-			return ResultSuccess
+			return ResultEndReached
 		}
 		if ret == ResultPageCompleted {
 			d.segmentList = append(d.segmentList, d.segment)
@@ -321,7 +321,7 @@ func (d *Document) decodeGrouped() Result {
 			seg := NewSegment()
 			ret := d.ParseSegmentHeader(seg)
 			if ret != ResultSuccess {
-				break
+				return ret
 			}
 			d.segmentList = append(d.segmentList, seg)
 			if seg.Flags.Type == 51 {
@@ -373,11 +373,10 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	}
 	sdd := NewSDDProc()
 	sdd.SDHUFF = (flags & 0x0001) != 0
-	sdd.SDREFAGG = ((flags >> 1) & 0x0001) != 0
-	sdd.SDMMR = ((flags >> 10) & 0x01) != 0
+	sdd.SDREFAGG = (flags & 0x0002) != 0
+	sdd.SDTEMPLATE = uint8((flags >> 10) & 0x0003)
+	sdd.SDRTEMPLATE = (flags & 0x1000) != 0
 	if !sdd.SDHUFF {
-		sdd.SDTEMPLATE = uint8((flags >> 2) & 0x0003)
-		sdd.SDRTEMPLATE = ((flags >> 4) & 0x0001) != 0
 		dwTemp := 2
 		if sdd.SDTEMPLATE == 0 {
 			dwTemp = 8
@@ -494,27 +493,29 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 		} else {
 			gbContextSize = 8192
 		}
-		if sdd.SDREFAGG {
-			if sdd.SDRTEMPLATE {
-				grContextSize = 1024
-			} else {
-				grContextSize = 8192
-			}
+	}
+	if sdd.SDREFAGG {
+		if sdd.SDRTEMPLATE {
+			grContextSize = 1024
+		} else {
+			grContextSize = 8192
 		}
 	}
 	var gbContexts, grContexts []ArithCtx
-	retainContexts := (flags & 0x0100) != 0
-	if retainContexts && len(segment.ReferredToSegmentNumbers) > 0 {
-		refSeg := d.FindSegmentByNumber(segment.ReferredToSegmentNumbers[0])
-		if refSeg != nil {
+	contextUsed := (flags & 0x0100) != 0
+	if contextUsed {
+		for i := len(segment.ReferredToSegmentNumbers) - 1; i >= 0; i-- {
+			refSeg := d.FindSegmentByNumber(segment.ReferredToSegmentNumbers[i])
+			if refSeg == nil || refSeg.Flags.Type != 0 {
+				continue
+			}
 			if len(refSeg.GBContexts) == gbContextSize {
-				gbContexts = make([]ArithCtx, gbContextSize)
-				copy(gbContexts, refSeg.GBContexts)
+				gbContexts = append([]ArithCtx(nil), refSeg.GBContexts...)
 			}
 			if len(refSeg.GRContexts) == grContextSize {
-				grContexts = make([]ArithCtx, grContextSize)
-				copy(grContexts, refSeg.GRContexts)
+				grContexts = append([]ArithCtx(nil), refSeg.GRContexts...)
 			}
+			break
 		}
 	}
 	if gbContexts == nil {
@@ -535,6 +536,10 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	}
 	if err != nil {
 		return ResultFailure
+	}
+	if (flags & 0x0200) != 0 {
+		segment.GBContexts = gbContexts
+		segment.GRContexts = grContexts
 	}
 	segment.ResultType = JBig2SymbolDictPointer
 	return ResultSuccess
@@ -622,37 +627,16 @@ func (d *Document) DecodeSymbolIDHuffmanTable(SBNUMSYMS uint32) []HuffmanCode {
 	if err := HuffmanAssignCode(huffmanCodes); err != nil {
 		return nil
 	}
+	runDecoder, err := newHuffmanCodeIndex(huffmanCodes)
+	if err != nil {
+		return nil
+	}
 	SBSYMCODES := make([]HuffmanCode, SBNUMSYMS)
 	i := int32(0)
-	loopSyms := 0
 	for i < int32(SBNUMSYMS) {
-		loopSyms++
-		if loopSyms > int(SBNUMSYMS)*10 {
+		j, err := runDecoder.Decode(d.stream)
+		if err != nil {
 			return nil
-		}
-		var j int
-		var nSafeVal int32
-		nBits := 0
-		loopInner := 0
-		for {
-			loopInner++
-			if loopInner > 1000 {
-				return nil
-			}
-			bit, err := d.stream.Read1Bit()
-			if err != nil {
-				return nil
-			}
-			nSafeVal = (nSafeVal << 1) | int32(bit)
-			nBits++
-			for j = 0; j < kRunCodesSize; j++ {
-				if int32(nBits) == huffmanCodes[j].Codelen && nSafeVal == huffmanCodes[j].Code {
-					break
-				}
-			}
-			if j < kRunCodesSize {
-				break
-			}
 		}
 		runcode := int32(j)
 		var run int32
@@ -788,11 +772,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 			return ResultFailure
 		}
 	} else {
-		dwTemp = 0
-		for (uint32(1) << dwTemp) < pTRD.SBNUMSYMS {
-			dwTemp++
-		}
-		pTRD.SBSYMCODELEN = uint8(dwTemp)
+		pTRD.SBSYMCODELEN = ceilLog2(pTRD.SBNUMSYMS)
 	}
 	if pTRD.SBHUFF {
 		cSBHUFFFS := huffFlags & 0x0003
@@ -1279,7 +1259,9 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	if d.page == nil {
 		return ResultFailure
 	}
-	d.page.Fill(pi.DefaultPixelValue)
+	if pi.DefaultPixelValue {
+		d.page.Fill(true)
+	}
 	d.pageInfoList = append(d.pageInfoList, pi)
 	d.inPage = true
 	return ResultSuccess

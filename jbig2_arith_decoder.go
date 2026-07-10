@@ -14,8 +14,6 @@
 
 package jbig2
 
-import "errors"
-
 // defaultAValue 默认A值
 const defaultAValue = 0x8000
 
@@ -132,10 +130,7 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 // 入参: cx 上下文
 // 返回: int 结果
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
-	if int(cx.I()) >= len(kQeTable) {
-		return 0
-	}
-	qe := kQeTable[cx.I()]
+	qe := kQeTable[cx.i]
 	ad.a -= uint32(qe.Qe)
 	if (ad.c >> 16) < ad.a {
 		if (ad.a & defaultAValue) != 0 {
@@ -224,7 +219,15 @@ func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 	prev := 1
 	s := decoder.Decode(&aid.iax[prev])
 	prev = (prev << 1) | s
-	idx := aid.recursiveDecode(decoder, &prev, 0)
+	idx := len(kArithIntDecodeData) - 1
+	for depth := 0; depth < idx; depth++ {
+		d := decoder.Decode(&aid.iax[prev])
+		prev = (prev << 1) | d
+		if d == 0 {
+			idx = depth
+			break
+		}
+	}
 	nTemp := 0
 	for i := 0; i < kArithIntDecodeData[idx].nNeedBits; i++ {
 		d := decoder.Decode(&aid.iax[prev])
@@ -242,23 +245,6 @@ func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 		return 0, false
 	}
 	return val, true
-}
-
-// recursiveDecode 递归解码
-// 入参: decoder 算术解码器, prev 上一个值, depth 深度
-// 返回: int 解码结果
-func (aid *ArithIntDecoder) recursiveDecode(decoder *ArithDecoder, prev *int, depth int) int {
-	kDepthEnd := len(kArithIntDecodeData) - 1
-	if depth == kDepthEnd {
-		return kDepthEnd
-	}
-	cx := &aid.iax[*prev]
-	d := decoder.Decode(cx)
-	*prev = (*prev << 1) | d
-	if d == 0 {
-		return depth
-	}
-	return aid.recursiveDecode(decoder, prev, depth+1)
 }
 
 // ArithIaidDecoder IAID解码器
@@ -280,9 +266,6 @@ func NewArithIaidDecoder(sbsymCodeLen uint8) *ArithIaidDecoder {
 func (aid *ArithIaidDecoder) Decode(decoder *ArithDecoder) (uint32, error) {
 	prev := 1
 	for i := uint8(0); i < aid.sbsymCodeLen; i++ {
-		if prev >= len(aid.iaid) {
-			return 0, errors.New("index out of bounds")
-		}
 		cx := &aid.iaid[prev]
 		d := decoder.Decode(cx)
 		prev = (prev << 1) | d

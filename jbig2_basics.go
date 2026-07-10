@@ -14,6 +14,8 @@
 
 package jbig2
 
+import "math/bits"
+
 const (
 	// JBig2OOB 越界标志
 	JBig2OOB = 1
@@ -69,6 +71,16 @@ type Rect struct {
 	Top    int32
 	Right  int32
 	Bottom int32
+}
+
+// ceilLog2 计算表示指定数量所需的位数
+// 入参: value 数量
+// 返回: uint8 位数
+func ceilLog2(value uint32) uint8 {
+	if value <= 1 {
+		return 0
+	}
+	return uint8(bits.Len32(value - 1))
 }
 
 // Width 获取宽度

@@ -60,10 +60,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	IARI := NewArithIntDecoder()
 	IARDW := NewArithIntDecoder()
 	IARDH := NewArithIntDecoder()
-	SBSYMCODELENA := uint8(0)
-	for (uint32(1) << SBSYMCODELENA) < (s.SDNUMINSYMS + s.SDNUMNEWSYMS) {
-		SBSYMCODELENA++
-	}
+	SBSYMCODELENA := ceilLog2(s.SDNUMINSYMS + s.SDNUMNEWSYMS)
 	IAID := NewArithIaidDecoder(SBSYMCODELENA)
 	SDNEWSYMS := make([]*Image, s.SDNUMNEWSYMS)
 	HCHEIGHT := uint32(0)
@@ -123,11 +120,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					pDecoder.SBNUMINSTANCES = uint32(REFAGGNINST)
 					pDecoder.SBSTRIPS = 1
 					pDecoder.SBNUMSYMS = s.SDNUMINSYMS + NSYMSDECODED
-					nTmp := uint32(0)
-					for (uint32(1) << nTmp) < pDecoder.SBNUMSYMS {
-						nTmp++
-					}
-					pDecoder.SBSYMCODELEN = uint8(nTmp)
+					pDecoder.SBSYMCODELEN = ceilLog2(pDecoder.SBNUMSYMS)
 					pDecoder.SBSYMS = make([]*Image, pDecoder.SBNUMSYMS)
 					copy(pDecoder.SBSYMS, s.SDINSYMS)
 					for i := 0; i < int(NSYMSDECODED); i++ {
@@ -251,6 +244,14 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 	}
 	HCHEIGHT := uint32(0)
 	NSYMSDECODED := uint32(0)
+	var aggregateTables [8]*HuffmanTable
+	if s.SDREFAGG {
+		aggregateTables = [8]*HuffmanTable{
+			NewStandardTable(6), NewStandardTable(8), NewStandardTable(11),
+			NewStandardTable(15), NewStandardTable(15), NewStandardTable(15),
+			NewStandardTable(15), NewStandardTable(1),
+		}
+	}
 	for NSYMSDECODED < s.SDNUMNEWSYMS {
 		var HCDH int32
 		if res := huffmanDecoder.DecodeAValue(s.SDHUFFDH, &HCDH); res != 0 {
@@ -300,9 +301,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					pDecoder.SBSTRIPS = 1
 					pDecoder.SBNUMSYMS = s.SDNUMINSYMS + NSYMSDECODED
 					pDecoder.SBSYMCODES = make([]HuffmanCode, pDecoder.SBNUMSYMS)
-					nTmp := uint32(1)
-					for (uint32(1) << nTmp) < pDecoder.SBNUMSYMS {
-						nTmp++
+					nTmp := uint32(ceilLog2(pDecoder.SBNUMSYMS))
+					if nTmp == 0 {
+						nTmp = 1
 					}
 					for i := uint32(0); i < pDecoder.SBNUMSYMS; i++ {
 						pDecoder.SBSYMCODES[i].Codelen = int32(nTmp)
@@ -318,14 +319,14 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					pDecoder.TRANSPOSED = false
 					pDecoder.REFCORNER = JBig2CornerTopLeft
 					pDecoder.SBDSOFFSET = 0
-					pDecoder.SBHUFFFS = NewStandardTable(6)
-					pDecoder.SBHUFFDS = NewStandardTable(8)
-					pDecoder.SBHUFFDT = NewStandardTable(11)
-					pDecoder.SBHUFFRDW = NewStandardTable(15)
-					pDecoder.SBHUFFRDH = NewStandardTable(15)
-					pDecoder.SBHUFFRDX = NewStandardTable(15)
-					pDecoder.SBHUFFRDY = NewStandardTable(15)
-					pDecoder.SBHUFFRSIZE = NewStandardTable(1)
+					pDecoder.SBHUFFFS = aggregateTables[0]
+					pDecoder.SBHUFFDS = aggregateTables[1]
+					pDecoder.SBHUFFDT = aggregateTables[2]
+					pDecoder.SBHUFFRDW = aggregateTables[3]
+					pDecoder.SBHUFFRDH = aggregateTables[4]
+					pDecoder.SBHUFFRDX = aggregateTables[5]
+					pDecoder.SBHUFFRDY = aggregateTables[6]
+					pDecoder.SBHUFFRSIZE = aggregateTables[7]
 					pDecoder.SBRTEMPLATE = s.SDRTEMPLATE
 					pDecoder.SBRAT = s.SDRAT
 					var err error
@@ -335,9 +336,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					}
 				} else if REFAGGNINST == 1 {
 					SBNUMSYMS := s.SDNUMINSYMS + NSYMSDECODED
-					nTmp := uint32(1)
-					for (uint32(1) << nTmp) < SBNUMSYMS {
-						nTmp++
+					nTmp := uint32(ceilLog2(SBNUMSYMS))
+					if nTmp == 0 {
+						nTmp = 1
 					}
 					SBSYMCODELEN := nTmp
 					IDI := uint32(0)
@@ -360,12 +361,10 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					if sbsyms_idi == nil {
 						return nil, errors.New("referenced symbol is nil")
 					}
-					SBHUFFRDX := NewStandardTable(15)
-					SBHUFFRSIZE := NewStandardTable(1)
 					var RDXI, RDYI, nVal int32
-					if huffmanDecoder.DecodeAValue(SBHUFFRDX, &RDXI) != 0 ||
-						huffmanDecoder.DecodeAValue(SBHUFFRDX, &RDYI) != 0 ||
-						huffmanDecoder.DecodeAValue(SBHUFFRSIZE, &nVal) != 0 {
+					if huffmanDecoder.DecodeAValue(aggregateTables[3], &RDXI) != 0 ||
+						huffmanDecoder.DecodeAValue(aggregateTables[3], &RDYI) != 0 ||
+						huffmanDecoder.DecodeAValue(aggregateTables[7], &nVal) != 0 {
 						return nil, errors.New("failed to decode refinement values")
 					}
 					stream.AlignByte()
@@ -410,46 +409,22 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				if BHC == nil {
 					return nil, errors.New("failed to create grid image")
 				}
-				data := stream.GetPointer()
-				bhcData := BHC.Data()
-				for i := uint32(0); i < HCHEIGHT; i++ {
-					copy(bhcData[int32(i)*BHC.Stride():], data[i*stride:i*stride+stride])
-				}
-				stream.AddOffset(stride * HCHEIGHT)
+				dataSize := stride * HCHEIGHT
+				copy(BHC.Data(), stream.GetPointer()[:dataSize])
+				stream.AddOffset(dataSize)
 			} else {
 				pGRD := NewGRDProc()
-				if s.SDHUFF {
-					pGRD.MMR = true
-				} else {
-					pGRD.MMR = s.SDMMR
-				}
+				pGRD.MMR = true
 				pGRD.GBW = TOTWIDTH
 				pGRD.GBH = HCHEIGHT
-				if !pGRD.MMR {
-					pGRD.GBAT = [8]int8{0, 0, 0, 0, 0, 0, 0, 0}
-					gbContexts := make([]ArithCtx, 65536)
-					arithDecoder := NewArithDecoder(stream)
-					var err error
-					BHC, err = pGRD.DecodeArith(arithDecoder, gbContexts)
-					if err != nil {
-						return nil, err
-					}
-				} else {
-					if stream.GetByteLeft() < uint32(BMSIZE) {
-						return nil, errors.New("insufficient data for mmr")
-					}
-					mmrData := make([]byte, BMSIZE)
-					for i := int32(0); i < BMSIZE; i++ {
-						val, err := stream.Read1Byte()
-						if err != nil {
-							return nil, err
-						}
-						mmrData[i] = val
-					}
-					mmrStream := NewBitStream(mmrData, 0)
-					if pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError || BHC == nil {
-						return nil, errors.New("mmr decoding failure")
-					}
+				if stream.GetByteLeft() < uint32(BMSIZE) {
+					return nil, errors.New("insufficient data for mmr")
+				}
+				mmrData := stream.GetPointer()[:BMSIZE]
+				stream.AddOffset(uint32(BMSIZE))
+				mmrStream := NewBitStream(mmrData, 0)
+				if pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError || BHC == nil {
+					return nil, errors.New("mmr decoding failure")
 				}
 			}
 			if BHC != nil {

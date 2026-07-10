@@ -320,13 +320,21 @@ func (i *Image) ToGoImage() image.Image {
 	for y := 0; y < h; y++ {
 		src := i.data[int32(y)*i.stride:]
 		dst := img.Pix[y*img.Stride:]
-		for x := 0; x < w; x++ {
-			bit := (src[x>>3] >> uint(7-(x&7))) & 1
-			if bit == 0 {
-				dst[x] = 255
-			} else {
-				dst[x] = 0
-			}
+		fullBytes := w >> 3
+		for byteIndex := 0; byteIndex < fullBytes; byteIndex++ {
+			value := src[byteIndex]
+			x := byteIndex << 3
+			dst[x] = ((value >> 7) & 1) - 1
+			dst[x+1] = ((value >> 6) & 1) - 1
+			dst[x+2] = ((value >> 5) & 1) - 1
+			dst[x+3] = ((value >> 4) & 1) - 1
+			dst[x+4] = ((value >> 3) & 1) - 1
+			dst[x+5] = ((value >> 2) & 1) - 1
+			dst[x+6] = ((value >> 1) & 1) - 1
+			dst[x+7] = (value & 1) - 1
+		}
+		for x := fullBytes << 3; x < w; x++ {
+			dst[x] = ((src[x>>3] >> uint(7-(x&7))) & 1) - 1
 		}
 	}
 	return img
