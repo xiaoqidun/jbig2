@@ -18,6 +18,7 @@ package jbig2
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/binary"
 	"errors"
 	"image"
 	"image/color"
@@ -322,20 +323,23 @@ func (i *Image) ToGoImage() image.Image {
 		dst := img.Pix[y*img.Stride:]
 		fullBytes := w >> 3
 		for byteIndex := 0; byteIndex < fullBytes; byteIndex++ {
-			value := src[byteIndex]
 			x := byteIndex << 3
-			dst[x] = ((value >> 7) & 1) - 1
-			dst[x+1] = ((value >> 6) & 1) - 1
-			dst[x+2] = ((value >> 5) & 1) - 1
-			dst[x+3] = ((value >> 4) & 1) - 1
-			dst[x+4] = ((value >> 3) & 1) - 1
-			dst[x+5] = ((value >> 2) & 1) - 1
-			dst[x+6] = ((value >> 1) & 1) - 1
-			dst[x+7] = (value & 1) - 1
+			binary.BigEndian.PutUint64(dst[x:], expandGrayByte(src[byteIndex]))
 		}
 		for x := fullBytes << 3; x < w; x++ {
 			dst[x] = ((src[x>>3] >> uint(7-(x&7))) & 1) - 1
 		}
 	}
 	return img
+}
+
+// expandGrayByte 将一个打包字节扩展为8个灰度像素
+// 入参: value 打包像素
+// 返回: uint64 灰度像素
+func expandGrayByte(value byte) uint64 {
+	pixels := uint64(value)
+	pixels = (pixels | pixels<<28) & 0x0000000F0000000F
+	pixels = (pixels | pixels<<14) & 0x0003000300030003
+	pixels = (pixels | pixels<<7) & 0x0101010101010101
+	return (pixels ^ 0x0101010101010101) * 0xFF
 }

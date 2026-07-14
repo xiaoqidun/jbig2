@@ -71,7 +71,7 @@ func (i *Image) Data() []byte {
 // 入参: y 纵坐标
 // 返回: []byte 行数据
 func (i *Image) row(y int32) []byte {
-	if y < 0 || y >= i.height {
+	if uint32(y) >= uint32(i.height) {
 		return nil
 	}
 	start := y * i.stride

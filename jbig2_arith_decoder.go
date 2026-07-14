@@ -58,22 +58,19 @@ type ArithQe struct {
 
 // ArithCtx 算术解码上下文
 type ArithCtx struct {
-	mps bool
-	i   uint8
+	state uint8
 }
 
 // DecodeNLPS 解码NLPS
 // 入参: qe 算术编码状态
 // 返回: int 解码值
 func (c *ArithCtx) DecodeNLPS(qe ArithQe) int {
-	d := 0
-	if !c.mps {
-		d = 1
-	}
+	mps := c.state & 1
+	d := int(mps ^ 1)
 	if qe.Switch {
-		c.mps = !c.mps
+		mps ^= 1
 	}
-	c.i = qe.NLPS
+	c.state = qe.NLPS<<1 | mps
 	return d
 }
 
@@ -81,26 +78,21 @@ func (c *ArithCtx) DecodeNLPS(qe ArithQe) int {
 // 入参: qe 算术编码状态
 // 返回: int 解码值
 func (c *ArithCtx) DecodeNMPS(qe ArithQe) int {
-	c.i = qe.NMPS
-	if c.mps {
-		return 1
-	}
-	return 0
+	mps := c.state & 1
+	c.state = qe.NMPS<<1 | mps
+	return int(mps)
 }
 
 // MPS 获取MPS
 // 返回: int MPS值
 func (c *ArithCtx) MPS() int {
-	if c.mps {
-		return 1
-	}
-	return 0
+	return int(c.state & 1)
 }
 
 // I 获取I
 // 返回: uint8 I值
 func (c *ArithCtx) I() uint8 {
-	return c.i
+	return c.state >> 1
 }
 
 // ArithDecoder 算术解码器
@@ -130,7 +122,7 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 // 入参: cx 上下文
 // 返回: int 结果
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
-	qe := kQeTable[cx.i]
+	qe := kQeTable[cx.state>>1]
 	ad.a -= uint32(qe.Qe)
 	if (ad.c >> 16) < ad.a {
 		if (ad.a & defaultAValue) != 0 {

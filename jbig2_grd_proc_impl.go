@@ -79,6 +79,9 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 	div2 := int32(opt / 2)
 	shift := uint(4 - opt)
 	shiftC9 := kOptConstant9[opt]
+	if opt == 0 {
+		shiftC9 = 11
+	}
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
 		h := int32(g.loopIndex)
 		if g.TPGDON {
@@ -96,15 +99,25 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 		row2 := img.row(h - 2)
 		row1 := img.row(h - 1)
 		row := img.row(h)
-		line1 := getPixelFromRow(row2, 1+mod2, img.width)
-		line1 |= getPixelFromRow(row2, mod2, img.width) << 1
-		if opt == 1 {
+		var line1, line2 uint32
+		if opt == 0 {
+			line1 = getPixelFromRow(row2, 2, img.width)
+			line1 |= getPixelFromRow(row2, 1, img.width) << 1
 			line1 |= getPixelFromRow(row2, 0, img.width) << 2
-		}
-		line2 := getPixelFromRow(row1, 2-div2, img.width)
-		line2 |= getPixelFromRow(row1, 1-div2, img.width) << 1
-		if opt < 2 {
+			line2 = getPixelFromRow(row1, 2, img.width)
+			line2 |= getPixelFromRow(row1, 1, img.width) << 1
 			line2 |= getPixelFromRow(row1, 0, img.width) << 2
+		} else {
+			line1 = getPixelFromRow(row2, 1+mod2, img.width)
+			line1 |= getPixelFromRow(row2, mod2, img.width) << 1
+			if opt == 1 {
+				line1 |= getPixelFromRow(row2, 0, img.width) << 2
+			}
+			line2 = getPixelFromRow(row1, 2-div2, img.width)
+			line2 |= getPixelFromRow(row1, 1-div2, img.width) << 1
+			if opt < 2 {
+				line2 |= getPixelFromRow(row1, 0, img.width) << 2
+			}
 		}
 		var line3 uint32
 		for w := int32(0); w < int32(g.GBW); w++ {
@@ -121,18 +134,18 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 				}
 				context |= line2 << (shift + 1)
 				context |= line1 << shiftC9
-				if opt == 0 {
-					context |= getPixelFromRow(row1, w-3, img.width) << 10
-					context |= getPixelFromRow(row2, w+2, img.width) << 11
-					context |= getPixelFromRow(row2, w-2, img.width) << 15
-				}
 				bVal = decoder.Decode(&gbContexts[context])
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			line1 = ((line1 << 1) | getPixelFromRow(row2, w+2+mod2, img.width)) & kOptConstant10[opt]
-			line2 = ((line2 << 1) | getPixelFromRow(row1, w+3-div2, img.width)) & kOptConstant11[opt]
+			if opt == 0 {
+				line1 = ((line1 << 1) | getPixelFromRow(row2, w+3, img.width)) & 0x1f
+				line2 = ((line2 << 1) | getPixelFromRow(row1, w+3, img.width)) & 0x3f
+			} else {
+				line1 = ((line1 << 1) | getPixelFromRow(row2, w+2+mod2, img.width)) & kOptConstant10[opt]
+				line2 = ((line2 << 1) | getPixelFromRow(row1, w+3-div2, img.width)) & kOptConstant11[opt]
+			}
 			line3 = ((line3 << 1) | uint32(bVal)) & kOptConstant12[opt]
 		}
 	}

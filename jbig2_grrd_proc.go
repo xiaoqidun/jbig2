@@ -85,9 +85,11 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 		refNextRow := g.GRREFERENCE.row(refY + 1)
 		lines[0] = getPixelFromRow(previousRow, 1, width)
 		lines[0] |= getPixelFromRow(previousRow, 0, width) << 1
+		lines[0] |= getPixelFromRow(previousRow, -1, width) << 2
 		lines[1] = 0
 		lines[2] = getPixelFromRow(refPreviousRow, referenceX+1, referenceWidth)
 		lines[2] |= getPixelFromRow(refPreviousRow, referenceX, referenceWidth) << 1
+		lines[2] |= getPixelFromRow(refPreviousRow, referenceX-1, referenceWidth) << 2
 		lines[3] = getPixelFromRow(refRow, referenceX+1, referenceWidth)
 		lines[3] |= getPixelFromRow(refRow, referenceX, referenceWidth) << 1
 		lines[3] |= getPixelFromRow(refRow, referenceX-1, referenceWidth) << 2
@@ -106,10 +108,8 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 				context := lines[4]
 				context |= lines[3] << 3
 				context |= lines[2] << 6
-				context |= getPixelFromRow(refPreviousRow, referenceX+w-1, referenceWidth) << 8
 				context |= lines[1] << 9
 				context |= lines[0] << 10
-				context |= getPixelFromRow(previousRow, w-1, width) << 12
 				if decoder.IsComplete() {
 					return nil, errors.New("decoder complete prematurely")
 				}
@@ -118,9 +118,9 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			lines[0] = ((lines[0] << 1) | getPixelFromRow(previousRow, w+2, width)) & 0x03
+			lines[0] = ((lines[0] << 1) | getPixelFromRow(previousRow, w+2, width)) & 0x07
 			lines[1] = ((lines[1] << 1) | uint32(bVal)) & 0x01
-			lines[2] = ((lines[2] << 1) | getPixelFromRow(refPreviousRow, referenceX+w+2, referenceWidth)) & 0x03
+			lines[2] = ((lines[2] << 1) | getPixelFromRow(refPreviousRow, referenceX+w+2, referenceWidth)) & 0x07
 			lines[3] = ((lines[3] << 1) | getPixelFromRow(refRow, referenceX+w+2, referenceWidth)) & 0x07
 			lines[4] = ((lines[4] << 1) | getPixelFromRow(refNextRow, referenceX+w+2, referenceWidth)) & 0x07
 		}
