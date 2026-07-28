@@ -17,8 +17,11 @@ package jbig2
 // defaultAValue 默认A值
 const defaultAValue = 0x8000
 
+// arithQeStateCount Qe状态数量
+const arithQeStateCount = 47
+
 // kQeTable Qe表
-var kQeTable = []ArithQe{
+var kQeTable = [128]ArithQe{
 	{0x5601, 1, 1, true}, {0x3401, 2, 6, false}, {0x1801, 3, 9, false},
 	{0x0AC1, 4, 12, false}, {0x0521, 5, 29, false}, {0x0221, 38, 33, false},
 	{0x5601, 7, 6, true}, {0x5401, 8, 14, false}, {0x4801, 9, 14, false},
@@ -122,29 +125,30 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 // 入参: cx 上下文
 // 返回: int 结果
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
-	qe := kQeTable[cx.state>>1]
-	ad.a -= uint32(qe.Qe)
+	qe := &kQeTable[cx.state>>1]
+	qeValue := uint32(qe.Qe)
+	ad.a -= qeValue
 	if (ad.c >> 16) < ad.a {
 		if (ad.a & defaultAValue) != 0 {
 			return cx.MPS()
 		}
 		var d int
-		if ad.a < uint32(qe.Qe) {
-			d = cx.DecodeNLPS(qe)
+		if ad.a < qeValue {
+			d = cx.DecodeNLPS(*qe)
 		} else {
-			d = cx.DecodeNMPS(qe)
+			d = cx.DecodeNMPS(*qe)
 		}
 		ad.readValueA()
 		return d
 	}
 	ad.c -= ad.a << 16
 	var d int
-	if ad.a < uint32(qe.Qe) {
-		d = cx.DecodeNMPS(qe)
+	if ad.a < qeValue {
+		d = cx.DecodeNMPS(*qe)
 	} else {
-		d = cx.DecodeNLPS(qe)
+		d = cx.DecodeNLPS(*qe)
 	}
-	ad.a = uint32(qe.Qe)
+	ad.a = qeValue
 	ad.readValueA()
 	return d
 }

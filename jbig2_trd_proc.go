@@ -360,6 +360,7 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 	STRIPT = -STRIPT
 	FIRSTS := int64(0)
 	NINSTANCES := uint32(0)
+	var refinementImage *Image
 	for NINSTANCES < t.SBNUMINSTANCES {
 		var initialDt int32
 		if res, ok := pIADT.Decode(arithDecoder); !ok {
@@ -455,10 +456,11 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 						pGRRD.GRREFERENCEDY = refDY
 						pGRRD.TPGRON = false
 						pGRRD.GRAT = t.SBRAT
-						IBI, err = pGRRD.Decode(arithDecoder, grContexts)
+						IBI, err = pGRRD.decodeInto(arithDecoder, grContexts, refinementImage)
 						if err != nil {
 							return nil, err
 						}
+						refinementImage = IBI
 					}
 				}
 			}

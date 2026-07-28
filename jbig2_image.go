@@ -43,6 +43,27 @@ func NewImage(width, height int32) *Image {
 	}
 }
 
+// reuseImage 复用图像缓冲
+// 入参: image 图像对象, width 宽度, height 高度
+// 返回: *Image 图像对象
+func reuseImage(image *Image, width, height int32) *Image {
+	if image == nil || width <= 0 || height <= 0 {
+		return NewImage(width, height)
+	}
+	stride := (width + 7) / 8
+	size := int(stride * height)
+	if size > cap(image.data) {
+		image.data = make([]byte, size)
+	} else {
+		image.data = image.data[:size]
+		clear(image.data)
+	}
+	image.width = width
+	image.height = height
+	image.stride = stride
+	return image
+}
+
 // Width 获取宽度
 // 返回: int32 宽度
 func (i *Image) Width() int32 {

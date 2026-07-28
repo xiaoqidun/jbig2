@@ -40,6 +40,13 @@ func NewGRRDProc() *GRRDProc {
 // 入参: arithDecoder 算术解码器, grContexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*Image, error) {
+	return g.decodeInto(arithDecoder, grContexts, nil)
+}
+
+// decodeInto 解码到复用图像
+// 入参: arithDecoder 算术解码器, grContexts 上下文, reuse 复用图像
+// 返回: *Image 图像, error 错误信息
+func (g *GRRDProc) decodeInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, reuse *Image) (*Image, error) {
 	if g.GRW > JBig2MaxImageSize || g.GRH > JBig2MaxImageSize {
 		return nil, errors.New("image size too large")
 	}
@@ -48,18 +55,18 @@ func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*I
 	}
 	if !g.GRTEMPLATE {
 		if g.GRAT[0] == -1 && g.GRAT[1] == -1 && g.GRAT[2] == -1 && g.GRAT[3] == -1 {
-			return g.decodeTemplate0Opt(arithDecoder, grContexts)
+			return g.decodeTemplate0Opt(arithDecoder, grContexts, reuse)
 		}
-		return g.decodeTemplate0Unopt(arithDecoder, grContexts)
+		return g.decodeTemplate0Unopt(arithDecoder, grContexts, reuse)
 	}
-	return g.decodeTemplate1Opt(arithDecoder, grContexts)
+	return g.decodeTemplate1Opt(arithDecoder, grContexts, reuse)
 }
 
 // decodeTemplate0Opt 模板0优化解码
-// 入参: decoder 算术解码器, contexts 上下文
+// 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
-func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
-	grReg := NewImage(int32(g.GRW), int32(g.GRH))
+func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
+	grReg := reuseImage(reuse, int32(g.GRW), int32(g.GRH))
 	if grReg == nil {
 		return nil, errors.New("failed to create image")
 	}
@@ -100,9 +107,9 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 			bVal := 0
 			needDecode := ltp == 0
 			if ltp != 0 {
-				value, predictable := typicalPixelFromRows(refPreviousRow, refRow, refNextRow, referenceX+w, referenceWidth)
-				bVal = int(value)
-				needDecode = !predictable
+				pixels := lines[2] | lines[3]<<3 | lines[4]<<6
+				bVal = int((lines[3] >> 1) & 1)
+				needDecode = pixels != 0 && pixels != 0x01ff
 			}
 			if needDecode {
 				context := lines[4]
@@ -129,10 +136,10 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 }
 
 // decodeTemplate1Opt 模板1优化解码
-// 入参: decoder 算术解码器, contexts 上下文
+// 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
-func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
-	grReg := NewImage(int32(g.GRW), int32(g.GRH))
+func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
+	grReg := reuseImage(reuse, int32(g.GRW), int32(g.GRH))
 	if grReg == nil {
 		return nil, errors.New("failed to create image")
 	}
@@ -214,10 +221,10 @@ func typicalPixelFromRows(previousRow, row, nextRow []byte, x, width int32) (uin
 }
 
 // decodeTemplate0Unopt 模板0非优化解码
-// 入参: decoder 算术解码器, contexts 上下文
+// 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
-func (g *GRRDProc) decodeTemplate0Unopt(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
-	grReg := NewImage(int32(g.GRW), int32(g.GRH))
+func (g *GRRDProc) decodeTemplate0Unopt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
+	grReg := reuseImage(reuse, int32(g.GRW), int32(g.GRH))
 	if grReg == nil {
 		return nil, errors.New("failed to create image")
 	}

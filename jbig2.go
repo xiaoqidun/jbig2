@@ -333,13 +333,21 @@ func (i *Image) ToGoImage() image.Image {
 	return img
 }
 
+// grayByteTable 灰度像素展开表
+var grayByteTable = func() (table [256]uint64) {
+	for value := range table {
+		pixels := uint64(value)
+		pixels = (pixels | pixels<<28) & 0x0000000F0000000F
+		pixels = (pixels | pixels<<14) & 0x0003000300030003
+		pixels = (pixels | pixels<<7) & 0x0101010101010101
+		table[value] = (pixels ^ 0x0101010101010101) * 0xFF
+	}
+	return
+}()
+
 // expandGrayByte 将一个打包字节扩展为8个灰度像素
 // 入参: value 打包像素
 // 返回: uint64 灰度像素
 func expandGrayByte(value byte) uint64 {
-	pixels := uint64(value)
-	pixels = (pixels | pixels<<28) & 0x0000000F0000000F
-	pixels = (pixels | pixels<<14) & 0x0003000300030003
-	pixels = (pixels | pixels<<7) & 0x0101010101010101
-	return (pixels ^ 0x0101010101010101) * 0xFF
+	return grayByteTable[value]
 }

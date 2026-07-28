@@ -82,6 +82,9 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 	if opt == 0 {
 		shiftC9 = 11
 	}
+	line1Mask := kOptConstant10[opt]
+	line2Mask := kOptConstant11[opt]
+	line3Mask := kOptConstant12[opt]
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
 		h := int32(g.loopIndex)
 		if g.TPGDON {
@@ -122,16 +125,13 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 		var line3 uint32
 		for w := int32(0); w < int32(g.GBW); w++ {
 			bVal := 0
+			row1Next := getPixelFromRow(row1, w+3-div2, img.width)
 			if !g.USESKIP || g.SKIP == nil || g.SKIP.GetPixel(w, h) == 0 {
 				if decoder.IsComplete() {
 					return JBig2SegmentError
 				}
 				context := line3
-				if opt < 2 {
-					context |= getPixelFromRow(row1, w+3, img.width) << shift
-				} else {
-					context |= getPixelFromRow(row1, w+2, img.width) << shift
-				}
+				context |= row1Next << shift
 				context |= line2 << (shift + 1)
 				context |= line1 << shiftC9
 				bVal = decoder.Decode(&gbContexts[context])
@@ -141,12 +141,12 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 			}
 			if opt == 0 {
 				line1 = ((line1 << 1) | getPixelFromRow(row2, w+3, img.width)) & 0x1f
-				line2 = ((line2 << 1) | getPixelFromRow(row1, w+3, img.width)) & 0x3f
+				line2 = ((line2 << 1) | row1Next) & 0x3f
 			} else {
-				line1 = ((line1 << 1) | getPixelFromRow(row2, w+2+mod2, img.width)) & kOptConstant10[opt]
-				line2 = ((line2 << 1) | getPixelFromRow(row1, w+3-div2, img.width)) & kOptConstant11[opt]
+				line1 = ((line1 << 1) | getPixelFromRow(row2, w+2+mod2, img.width)) & line1Mask
+				line2 = ((line2 << 1) | row1Next) & line2Mask
 			}
-			line3 = ((line3 << 1) | uint32(bVal)) & kOptConstant12[opt]
+			line3 = ((line3 << 1) | uint32(bVal)) & line3Mask
 		}
 	}
 	return JBig2SegmentParseComplete
@@ -183,19 +183,20 @@ func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2Se
 		var line2 uint32
 		for w := int32(0); w < int32(g.GBW); w++ {
 			bVal := 0
+			previousRowNext := getPixelFromRow(previousRow, w+2, img.width)
 			if !g.USESKIP || g.SKIP == nil || g.SKIP.GetPixel(w, h) == 0 {
 				if decoder.IsComplete() {
 					return JBig2SegmentError
 				}
 				context := line2
-				context |= getPixelFromRow(previousRow, w+2, img.width) << 4
+				context |= previousRowNext << 4
 				context |= line1 << 5
 				bVal = decoder.Decode(&gbContexts[context])
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			line1 = ((line1 << 1) | getPixelFromRow(previousRow, w+2, img.width)) & 0x1f
+			line1 = ((line1 << 1) | previousRowNext) & 0x1f
 			line2 = ((line2 << 1) | uint32(bVal)) & 0x0f
 		}
 	}

@@ -744,26 +744,34 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		}
 	}
 	dwNumSyms := uint32(0)
+	var singleDict *SymbolDict
+	dictCount := 0
 	for _, refNum := range segment.ReferredToSegmentNumbers {
 		seg := d.FindSegmentByNumber(refNum)
 		if seg != nil && seg.Flags.Type == 0 && seg.SymbolDict != nil {
 			dwNumSyms += uint32(seg.SymbolDict.NumImages())
+			singleDict = seg.SymbolDict
+			dictCount++
 		}
 	}
 	pTRD.SBNUMSYMS = dwNumSyms
-	SBSYMS := make([]*Image, pTRD.SBNUMSYMS)
-	dwNumSyms = 0
-	for _, refNum := range segment.ReferredToSegmentNumbers {
-		seg := d.FindSegmentByNumber(refNum)
-		if seg != nil && seg.Flags.Type == 0 && seg.SymbolDict != nil {
-			dict := seg.SymbolDict
-			for j := 0; j < dict.NumImages(); j++ {
-				SBSYMS[dwNumSyms+uint32(j)] = dict.GetImage(j)
+	if dictCount == 1 {
+		pTRD.SBSYMS = singleDict.Images
+	} else {
+		SBSYMS := make([]*Image, pTRD.SBNUMSYMS)
+		dwNumSyms = 0
+		for _, refNum := range segment.ReferredToSegmentNumbers {
+			seg := d.FindSegmentByNumber(refNum)
+			if seg != nil && seg.Flags.Type == 0 && seg.SymbolDict != nil {
+				dict := seg.SymbolDict
+				for j := 0; j < dict.NumImages(); j++ {
+					SBSYMS[dwNumSyms+uint32(j)] = dict.GetImage(j)
+				}
+				dwNumSyms += uint32(dict.NumImages())
 			}
-			dwNumSyms += uint32(dict.NumImages())
 		}
+		pTRD.SBSYMS = SBSYMS
 	}
-	pTRD.SBSYMS = SBSYMS
 	if pTRD.SBHUFF {
 		if encodedTable := d.DecodeSymbolIDHuffmanTable(pTRD.SBNUMSYMS); encodedTable != nil {
 			d.stream.AlignByte()
