@@ -147,12 +147,21 @@ func checkTRDReferenceDimension(dimension int32, shift uint32, offset int32) (in
 // 入参: stream 位流, grContexts 细化上下文集
 // 返回: *Image 图像对象, error 错误信息
 func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Image, error) {
-	sbReg := NewImage(int32(t.SBW), int32(t.SBH))
+	return t.decodeHuffmanInto(stream, grContexts, nil)
+}
+
+// decodeHuffmanInto 霍夫曼解码到指定图像
+// 入参: stream 位流, grContexts 细化上下文集, sbReg 指定图像
+// 返回: *Image 图像对象, error 错误信息
+func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sbReg *Image) (*Image, error) {
 	if sbReg == nil {
-		return nil, errors.New("failed to create text region image")
-	}
-	if t.SBDEFPIXEL {
-		sbReg.Fill(true)
+		sbReg = NewImage(int32(t.SBW), int32(t.SBH))
+		if sbReg == nil {
+			return nil, errors.New("failed to create text region image")
+		}
+		if t.SBDEFPIXEL {
+			sbReg.Fill(true)
+		}
 	}
 	decoder := NewHuffmanDecoder(stream)
 	symbolDecoder, err := newHuffmanCodeIndex(t.SBSYMCODES)
@@ -299,6 +308,13 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 // 入参: arithDecoder 算术解码器, grContexts 细化上下文集, ids 整数解码器状态
 // 返回: *Image 图像对象, error 错误信息
 func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState) (*Image, error) {
+	return t.decodeArithInto(arithDecoder, grContexts, ids, nil)
+}
+
+// decodeArithInto 算术解码到指定图像
+// 入参: arithDecoder 算术解码器, grContexts 细化上下文集, ids 整数解码器状态, sbReg 指定图像
+// 返回: *Image 图像对象, error 错误信息
+func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState, sbReg *Image) (*Image, error) {
 	var pIADT, pIAFS, pIADS, pIAIT, pIARI, pIARDW, pIARDH, pIARDX, pIARDY *ArithIntDecoder
 	var pIAID *ArithIaidDecoder
 	if ids != nil {
@@ -343,12 +359,14 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 	if pIAID == nil {
 		pIAID = NewArithIaidDecoder(t.SBSYMCODELEN)
 	}
-	sbReg := NewImage(int32(t.SBW), int32(t.SBH))
 	if sbReg == nil {
-		return nil, errors.New("failed to create text region image")
-	}
-	if t.SBDEFPIXEL {
-		sbReg.Fill(true)
+		sbReg = NewImage(int32(t.SBW), int32(t.SBH))
+		if sbReg == nil {
+			return nil, errors.New("failed to create text region image")
+		}
+		if t.SBDEFPIXEL {
+			sbReg.Fill(true)
+		}
 	}
 	var initialStript int32
 	if res, ok := pIADT.Decode(arithDecoder); !ok {

@@ -43,6 +43,7 @@ type Document struct {
 	groupedIndex  int
 	groupedParsed bool
 	inPage        bool
+	pageWritten   bool
 	bufSpecified  bool
 	randomAccess  bool
 	Grouped       bool
@@ -587,6 +588,28 @@ func composeOpFromRegionFlags(flags uint8) ComposeOp {
 	return ComposeOp(flags & 0x03)
 }
 
+// canDecodeTextRegionIntoPage 检查文本区域是否可直接解码到页面
+// 入参: segment 段对象, ri 区域信息, trd 文本区域解码过程
+// 返回: bool 是否可直接解码
+func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo, trd *TRDProc) bool {
+	if d.pageWritten || d.bufSpecified || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
+		return false
+	}
+	pi := d.pageInfoList[len(d.pageInfoList)-1]
+	if pi.IsStriped || pi.DefaultPixelValue != trd.SBDEFPIXEL ||
+		ri.X != 0 || ri.Y != 0 || ri.Width != d.page.Width() || ri.Height != d.page.Height() {
+		return false
+	}
+	op := composeOpFromRegionFlags(ri.Flags)
+	if op == ComposeReplace {
+		return true
+	}
+	if pi.DefaultPixelValue {
+		return op == ComposeAnd || op == ComposeXnor
+	}
+	return op == ComposeOr || op == ComposeXor
+}
+
 // expandPageForRegion 根据区域扩展页面
 // 入参: ri 区域信息
 func (d *Document) expandPageForRegion(ri *RegionInfo) {
@@ -885,10 +908,15 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		grContexts = make([]ArithCtx, size)
 	}
 	segment.ResultType = JBig2ImagePointer
+	directToPage := d.canDecodeTextRegionIntoPage(segment, &ri, pTRD)
+	var target *Image
+	if directToPage {
+		target = d.page
+	}
 	var err error
 	if pTRD.SBHUFF {
 		var img *Image
-		img, err = pTRD.DecodeHuffman(d.stream, grContexts)
+		img, err = pTRD.decodeHuffmanInto(d.stream, grContexts, target)
 		if err == nil {
 			segment.Image = img
 			d.stream.AlignByte()
@@ -896,7 +924,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 	} else {
 		arithDecoder := NewArithDecoder(d.stream)
 		var img *Image
-		img, err = pTRD.DecodeArith(arithDecoder, grContexts, nil)
+		img, err = pTRD.decodeArithInto(arithDecoder, grContexts, nil, target)
 		if err == nil {
 			segment.Image = img
 			d.stream.AlignByte()
@@ -907,9 +935,12 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		return ResultFailure
 	}
 	if segment.Flags.Type != 4 {
-		d.expandPageForRegion(&ri)
-		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		if !directToPage {
+			d.expandPageForRegion(&ri)
+			d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		}
 		segment.Image = nil
+		d.pageWritten = true
 	}
 	return ResultSuccess
 }
@@ -1063,6 +1094,7 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 		d.expandPageForRegion(&ri)
 		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
+		d.pageWritten = true
 	}
 	return ResultSuccess
 }
@@ -1131,6 +1163,7 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		d.expandPageForRegion(&ri)
 		d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
+		d.pageWritten = true
 	}
 	return ResultSuccess
 }
@@ -1215,6 +1248,7 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	if segment.Flags.Type != 40 {
 		d.expandPageForRegion(&ri)
 		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		d.pageWritten = true
 	}
 	return ResultSuccess
 }
@@ -1272,6 +1306,7 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	}
 	d.pageInfoList = append(d.pageInfoList, pi)
 	d.inPage = true
+	d.pageWritten = false
 	return ResultSuccess
 }
 

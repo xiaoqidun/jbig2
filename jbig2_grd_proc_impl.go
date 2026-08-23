@@ -31,7 +31,58 @@ var (
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2SegmentState {
-	return g.decodeTemplateOpt(state, 0)
+	if state.Image == nil || *state.Image == nil {
+		return JBig2SegmentError
+	}
+	img := *state.Image
+	gbContexts := state.GbContexts
+	decoder := state.ArithDecoder
+	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		h := int32(g.loopIndex)
+		if g.TPGDON {
+			if decoder.IsComplete() {
+				return JBig2SegmentError
+			}
+			if decoder.Decode(&gbContexts[0x9b25]) != 0 {
+				g.ltp ^= 1
+			}
+		}
+		if g.ltp == 1 {
+			img.CopyLine(h, h-1)
+			continue
+		}
+		row2 := img.row(h - 2)
+		row1 := img.row(h - 1)
+		row := img.row(h)
+		line1 := getPixelFromRow(row2, 2, img.width)
+		line1 |= getPixelFromRow(row2, 1, img.width) << 1
+		line1 |= getPixelFromRow(row2, 0, img.width) << 2
+		line2 := getPixelFromRow(row1, 2, img.width)
+		line2 |= getPixelFromRow(row1, 1, img.width) << 1
+		line2 |= getPixelFromRow(row1, 0, img.width) << 2
+		var line3 uint32
+		for w := int32(0); w < int32(g.GBW); w++ {
+			bVal := 0
+			row1Next := getPixelFromRow(row1, w+3, img.width)
+			if !g.USESKIP || g.SKIP == nil || g.SKIP.GetPixel(w, h) == 0 {
+				if decoder.IsComplete() {
+					return JBig2SegmentError
+				}
+				context := line3
+				context |= row1Next << 4
+				context |= line2 << 5
+				context |= line1 << 11
+				bVal = decoder.Decode(&gbContexts[context])
+			}
+			if bVal != 0 {
+				setPixelInRow(row, w)
+			}
+			line1 = ((line1 << 1) | getPixelFromRow(row2, w+3, img.width)) & 0x1f
+			line2 = ((line2 << 1) | row1Next) & 0x3f
+			line3 = ((line3 << 1) | uint32(bVal)) & 0x0f
+		}
+	}
+	return JBig2SegmentParseComplete
 }
 
 // decodeTemplate0Unopt 模板0非优化解码

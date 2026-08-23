@@ -109,6 +109,13 @@ func getPixelFromRow(row []byte, x, width int32) uint32 {
 	return uint32((row[x>>3] >> uint(7-(x&7))) & 1)
 }
 
+// getPixelFromRowUnchecked 获取有效坐标的行内像素
+// 入参: row 行数据, x 横坐标
+// 返回: uint32 像素值
+func getPixelFromRowUnchecked(row []byte, x int32) uint32 {
+	return uint32((row[x>>3] >> uint(7-(x&7))) & 1)
+}
+
 // setPixelInRow 设置行内前景像素
 // 入参: row 行数据, x 横坐标
 func setPixelInRow(row []byte, x int32) {
@@ -171,6 +178,11 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	if op < ComposeOr || op > ComposeReplace {
 		return
 	}
+	if op == ComposeOr && i != dst && x >= 0 && y >= 0 && x&7 != 0 &&
+		int64(x)+int64(i.width) <= int64(dst.width) && int64(y)+int64(i.height) <= int64(dst.height) {
+		i.composeOrTo(dst, x, y)
+		return
+	}
 	srcX0 := int64(0)
 	srcY0 := int64(0)
 	srcX1 := int64(i.width)
@@ -220,6 +232,31 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 			dstIndex := dstY*dst.stride + (dstX >> 3)
 			dst.data[dstIndex] = composeByte(dst.data[dstIndex], srcBits, mask, op)
 			srcX += count
+		}
+	}
+}
+
+// composeOrTo 将当前图像快速或到目标图像
+// 入参: dst 目标图像, x 轴坐标, y 轴坐标
+func (i *Image) composeOrTo(dst *Image, x, y int32) {
+	shift := uint(x & 7)
+	fullBytes := i.width >> 3
+	tailBits := i.width & 7
+	tailMask := byte(0xff << uint(8-tailBits))
+	for srcY := int32(0); srcY < i.height; srcY++ {
+		src := i.data[srcY*i.stride:]
+		dst := dst.data[(y+srcY)*dst.stride+(x>>3):]
+		for byteIndex := int32(0); byteIndex < fullBytes; byteIndex++ {
+			value := src[byteIndex]
+			dst[byteIndex] |= value >> shift
+			dst[byteIndex+1] |= value << (8 - shift)
+		}
+		if tailBits != 0 {
+			value := src[fullBytes] & tailMask
+			dst[fullBytes] |= value >> shift
+			if int32(shift)+tailBits > 8 {
+				dst[fullBytes+1] |= value << (8 - shift)
+			}
 		}
 	}
 }
