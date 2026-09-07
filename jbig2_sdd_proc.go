@@ -215,7 +215,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 			implicit = true
 			break
 		}
-		if EXINDEX+uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS {
+		if EXRUNLENGTH < 0 || uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS-EXINDEX {
 			return nil, errors.New("exrunlength out of bounds")
 		}
 		if CUREXFLAG {
@@ -490,7 +490,7 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 			implicit = true
 			break
 		}
-		if EXINDEX+uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS {
+		if EXRUNLENGTH < 0 || uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS-EXINDEX {
 			return nil, errors.New("exrunlength out of bounds")
 		}
 		if CUREXFLAG {

@@ -246,7 +246,7 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 			return 0, err
 		}
 		if code == nil {
-			break
+			return 0, errors.New("invalid mmr mode")
 		}
 		m.stream.SetBitPos(m.stream.GetBitPos() + uint32(code.bitLength))
 		switch code.runLength {

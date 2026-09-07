@@ -264,7 +264,7 @@ func (d *Document) ParseSegmentData(segment *Segment) Result {
 		d.inPage = false
 		return ResultPageCompleted
 	case 50:
-		d.stream.AddOffset(segment.DataLength)
+		return d.parseEndOfStripe()
 	case 51:
 		return ResultEndReached
 	case 52:
@@ -1003,6 +1003,11 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 		} else {
 			pTRD.SBHUFFRSIZE = getUserTable()
 		}
+		if pTRD.SBHUFFFS == nil || pTRD.SBHUFFDS == nil || pTRD.SBHUFFDT == nil ||
+			pTRD.SBHUFFRDW == nil || pTRD.SBHUFFRDH == nil || pTRD.SBHUFFRDX == nil ||
+			pTRD.SBHUFFRDY == nil || pTRD.SBHUFFRSIZE == nil {
+			return ResultFailure
+		}
 	}
 	var grContexts []ArithCtx
 	if pTRD.SBREFINE {
@@ -1480,6 +1485,43 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	d.pageInfoList = append(d.pageInfoList, pi)
 	d.inPage = true
 	d.pageWritten = false
+	return ResultSuccess
+}
+
+// parseEndOfStripe 解析条带结束段
+// 返回: Result 解析结果
+func (d *Document) parseEndOfStripe() Result {
+	if !d.inPage {
+		return ResultFailure
+	}
+	line, err := d.stream.ReadInteger()
+	if err != nil || line >= 0x7FFFFFFF {
+		return ResultFailure
+	}
+	pi := d.pageInfoList[len(d.pageInfoList)-1]
+	if pi.Height != 0xFFFFFFFF || d.bufSpecified {
+		return ResultSuccess
+	}
+	height := int32(line + 1)
+	d.page.Expand(height, pi.DefaultPixelValue)
+	if d.page.Height() < height {
+		return ResultFailure
+	}
+	d.page.height = height
+	d.page.data = d.page.data[:d.page.stride*height]
+	if d.colorPage != nil {
+		if int(height) > d.colorPage.Rect.Dy() {
+			grown := newColorImage(d.page.Width(), height)
+			if grown == nil {
+				return ResultFailure
+			}
+			copy(grown.Pix, d.colorPage.Pix)
+			d.colorPage = grown
+		} else {
+			d.colorPage.Rect.Max.Y = int(height)
+			d.colorPage.Pix = d.colorPage.Pix[:int(height)*d.colorPage.Stride]
+		}
+	}
 	return ResultSuccess
 }
 
