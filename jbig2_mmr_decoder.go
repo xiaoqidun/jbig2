@@ -256,6 +256,7 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 			refIdx++
 			continue
 		case mmrHoriz:
+			start := bitPos
 			for i := 0; i < 2; i++ {
 				var table []*mmrCode
 				if (i == 0 && whiteRun) || (i == 1 && !whiteRun) {
@@ -273,7 +274,7 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 						return 0, errors.New("invalid code in horiz run")
 					}
 					m.stream.SetBitPos(m.stream.GetBitPos() + uint32(c.bitLength))
-					if c.runLength < 0 {
+					if c.runLength < 0 || c.runLength > m.width-bitPos-run {
 						return 0, errors.New("mmr error in horiz run")
 					}
 					run += c.runLength
@@ -282,11 +283,17 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 					}
 				}
 				bitPos += run
-				if bitPos > m.width {
+				if i == 1 && run == 0 && bitPos == m.width {
+					break
+				}
+				if currIdx >= m.width+1 {
 					return 0, errors.New("mmr run exceeds width")
 				}
 				currOffsets[currIdx] = bitPos
 				currIdx++
+			}
+			if bitPos <= start {
+				return 0, errors.New("mmr run does not advance")
 			}
 			for bitPos < m.width && refOffsets[refIdx] <= bitPos {
 				refIdx += 2
@@ -309,7 +316,8 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		default:
 			return 0, errors.New("unsupported mmr mode")
 		}
-		if bitPos < 0 || bitPos > m.width {
+		if bitPos < 0 || bitPos > m.width || currIdx >= m.width+1 ||
+			(currIdx > 0 && bitPos <= currOffsets[currIdx-1]) {
 			return 0, errors.New("mmr offset out of bounds")
 		}
 		currOffsets[currIdx] = bitPos

@@ -97,6 +97,7 @@ func (h *HuffmanTable) parseFromStandardTable(idx int) bool {
 		h.CODES[i].Codelen = def.Lines[i].PrefLen
 		h.CODES[i].Val1 = def.Lines[i].RangeLen
 		h.CODES[i].Val2 = def.Lines[i].RangeLow
+		h.CODES[i].LowerRange = def.Lines[i].RangeLen == 32 && def.Lines[i].RangeLow < 0
 	}
 	return h.finalize()
 }

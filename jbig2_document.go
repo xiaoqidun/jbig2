@@ -218,6 +218,9 @@ func (d *Document) FindSegmentByNumber(number uint32) *Segment {
 // 入参: segment 段对象
 // 返回: Result 结果
 func (d *Document) ParseSegmentData(segment *Segment) Result {
+	if segment.DataLength != 0xFFFFFFFF && segment.DataLength > d.stream.GetByteLeft() {
+		return ResultFailure
+	}
 	switch segment.Flags.Type {
 	case 0:
 		return d.parseSymbolDict(segment)
@@ -299,12 +302,7 @@ func (d *Document) DecodeSequential() Result {
 			return ret
 		}
 		if d.segment.DataLength != 0xFFFFFFFF {
-			newOffset := int64(d.offset) + int64(d.segment.DataLength)
-			if uint32(newOffset) <= d.stream.GetLength() {
-				d.stream.SetOffset(uint32(newOffset))
-			} else {
-				d.stream.SetOffset(d.stream.GetLength())
-			}
+			d.stream.SetOffset(d.offset + d.segment.DataLength)
 		} else {
 			d.stream.AddOffset(4)
 		}
@@ -409,6 +407,9 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	} else {
 		sdd.SDNUMNEWSYMS = val
 	}
+	if sdd.SDNUMNEWSYMS > JBig2MaxNewSymbols || sdd.SDNUMEXSYMS > JBig2MaxExportSymbols {
+		return ResultFailure
+	}
 	var inputSymbols []*Image
 	if segment.ReferredToSegmentCount > 0 {
 		for _, refNum := range segment.ReferredToSegmentNumbers {
@@ -423,6 +424,9 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	}
 	sdd.SDINSYMS = inputSymbols
 	sdd.SDNUMINSYMS = uint32(len(inputSymbols))
+	if sdd.SDNUMEXSYMS > sdd.SDNUMINSYMS+sdd.SDNUMNEWSYMS {
+		return ResultFailure
+	}
 	if sdd.SDHUFF {
 		cSDHUFFDH := (flags >> 2) & 0x0003
 		cSDHUFFDW := (flags >> 4) & 0x0003
