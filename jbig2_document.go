@@ -14,6 +14,11 @@
 
 package jbig2
 
+import (
+	"image"
+	"image/color"
+)
+
 // Result 解析结果
 type Result int
 
@@ -32,22 +37,24 @@ const (
 
 // Document 文档上下文
 type Document struct {
-	stream        *BitStream
-	globalContext *Document
-	segmentList   []*Segment
-	page          *Image
-	pageInfoList  []*PageInfo
-	segment       *Segment
-	offset        uint32
-	groupedOffset uint32
-	groupedIndex  int
-	groupedParsed bool
-	inPage        bool
-	pageWritten   bool
-	bufSpecified  bool
-	randomAccess  bool
-	Grouped       bool
-	OrgMode       int
+	stream          *BitStream
+	globalContext   *Document
+	segmentList     []*Segment
+	page            *Image
+	colorPage       *image.NRGBA64
+	referenceColors bool
+	pageInfoList    []*PageInfo
+	segment         *Segment
+	offset          uint32
+	groupedOffset   uint32
+	groupedIndex    int
+	groupedParsed   bool
+	inPage          bool
+	pageWritten     bool
+	bufSpecified    bool
+	randomAccess    bool
+	Grouped         bool
+	OrgMode         int
 }
 
 // GetSegments 获取段列表
@@ -264,6 +271,8 @@ func (d *Document) ParseSegmentData(segment *Segment) Result {
 		d.stream.AddOffset(segment.DataLength)
 	case 53:
 		return d.parseTable(segment)
+	case 54:
+		return d.parseColorPalette(segment)
 	case 62:
 		d.stream.AddOffset(segment.DataLength)
 	default:
@@ -607,7 +616,7 @@ func (d *Document) ParseRegionInfo(ri *RegionInfo) Result {
 	} else {
 		ri.Flags = val
 	}
-	if ri.Flags&0x08 != 0 {
+	if ri.Flags&0x08 != 0 && d.colorPage == nil {
 		return ResultFailure
 	}
 	return ResultSuccess
@@ -627,7 +636,7 @@ func composeOpFromRegionFlags(flags uint8) ComposeOp {
 // 入参: segment 段对象, ri 区域信息, trd 文本区域解码过程
 // 返回: bool 是否可直接解码
 func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo, trd *TRDProc) bool {
-	if d.pageWritten || d.bufSpecified || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
+	if d.colorPage != nil || d.pageWritten || d.bufSpecified || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
 		return false
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
@@ -827,6 +836,34 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 	} else {
 		pTRD.SBNUMINSTANCES = val
 	}
+	referenceColors := false
+	if ri.Flags&0x08 != 0 {
+		data := d.stream.data
+		if segment.DataLength == 0xFFFFFFFF || d.stream.GetByteLeft() < 10 {
+			return ResultFailure
+		}
+		size := readUint32(data[len(data)-4:], d.stream.littleEndian)
+		if size < 10 || size > d.stream.GetByteLeft() {
+			return ResultFailure
+		}
+		palette, err := d.getColorPalette(segment)
+		if err != nil {
+			return ResultFailure
+		}
+		start := len(data) - int(size)
+		stream := NewBitStream(data[start:len(data)-4], 0)
+		stream.SetLittleEndian(d.stream.littleEndian)
+		pTRD.colorRuns, referenceColors, err = decodeColorRuns(stream, pTRD.SBNUMINSTANCES, palette, implicit)
+		if err != nil {
+			return ResultFailure
+		}
+		pTRD.colorImage = newColorImage(ri.Width, ri.Height)
+		if pTRD.colorImage == nil {
+			return ResultFailure
+		}
+		d.stream.data = data[:start]
+		defer func() { d.stream.data = data }()
+	}
 	if len(refNumbers) > 0 {
 		for _, refNum := range refNumbers {
 			if d.FindSegmentByNumber(refNum) == nil {
@@ -1005,12 +1042,19 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 	if err != nil || segment.Image == nil {
 		return ResultFailure
 	}
+	segment.colorImage = pTRD.colorImage
+	d.referenceColors = d.referenceColors || referenceColors
 	if segment.Flags.Type != 4 {
 		if !directToPage {
 			d.expandPageForRegion(&ri)
-			d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+			if d.colorPage == nil {
+				d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+			} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
+				return ResultFailure
+			}
 		}
 		segment.Image = nil
+		segment.colorImage = nil
 		d.pageWritten = true
 	}
 	return ResultSuccess
@@ -1082,6 +1126,9 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 	var flags byte
 	pHRD := NewHTRDProc()
 	if d.ParseRegionInfo(&ri) != ResultSuccess {
+		return ResultFailure
+	}
+	if ri.Flags&0x08 != 0 {
 		return ResultFailure
 	}
 	if val, err := d.stream.Read1Byte(); err != nil {
@@ -1163,7 +1210,11 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 	}
 	if segment.Flags.Type != 20 {
 		d.expandPageForRegion(&ri)
-		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		if d.colorPage == nil {
+			d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
+			return ResultFailure
+		}
 		segment.Image = nil
 		d.pageWritten = true
 	}
@@ -1178,6 +1229,24 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	var flags byte
 	if d.ParseRegionInfo(&ri) != ResultSuccess {
 		return ResultFailure
+	}
+	var foreground color.NRGBA64
+	if ri.Flags&0x08 != 0 {
+		data := d.stream.data
+		if segment.DataLength == 0xFFFFFFFF || d.stream.GetByteLeft() < 4 {
+			return ResultFailure
+		}
+		palette, err := d.getColorPalette(segment)
+		if err != nil {
+			return ResultFailure
+		}
+		id := readUint32(data[len(data)-4:], d.stream.littleEndian)
+		if uint64(id) >= uint64(len(palette)) {
+			return ResultFailure
+		}
+		foreground = palette[id]
+		d.stream.data = data[:len(data)-4]
+		defer func() { d.stream.data = data }()
 	}
 	if val, err := d.stream.Read1Byte(); err != nil {
 		return ResultFailure
@@ -1239,11 +1308,23 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		d.stream.AlignByte()
 		d.stream.AddOffset(2)
 	}
+	if ri.Flags&0x08 != 0 {
+		segment.colorImage = newColorImage(ri.Width, ri.Height)
+		if segment.colorImage == nil {
+			return ResultFailure
+		}
+		paintColorMask(segment.colorImage, segment.Image, 0, 0, foreground)
+	}
 	if segment.Flags.Type != 36 {
-		rect := pGRD.GetReplaceRect()
 		d.expandPageForRegion(&ri)
-		d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		if d.colorPage == nil {
+			rect := pGRD.GetReplaceRect()
+			d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
+			return ResultFailure
+		}
 		segment.Image = nil
+		segment.colorImage = nil
 		d.pageWritten = true
 	}
 	return ResultSuccess
@@ -1268,6 +1349,9 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	var ri RegionInfo
 	var flags byte
 	if d.ParseRegionInfo(&ri) != ResultSuccess {
+		return ResultFailure
+	}
+	if d.colorPage != nil {
 		return ResultFailure
 	}
 	if val, err := d.stream.Read1Byte(); err != nil {
@@ -1371,7 +1455,7 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	} else {
 		striping = val
 	}
-	pi.DefaultPixelValue = (flags & 4) != 0
+	pi.DefaultPixelValue = (flags&4) != 0 && (flags&0x80) == 0
 	pi.IsStriped = (striping & 0x8000) != 0
 	pi.MaxStripeSize = striping & 0x7FFF
 	height := pi.Height
@@ -1381,6 +1465,14 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	d.page = NewImage(int32(pi.Width), int32(height))
 	if d.page == nil {
 		return ResultFailure
+	}
+	d.colorPage = nil
+	d.referenceColors = false
+	if flags&0x80 != 0 {
+		d.colorPage = newColorImage(int32(pi.Width), int32(height))
+		if d.colorPage == nil {
+			return ResultFailure
+		}
 	}
 	if pi.DefaultPixelValue {
 		d.page.Fill(true)
@@ -1415,6 +1507,8 @@ func (d *Document) ReleasePageSegments(pageNumber uint32) {
 			n++
 		} else {
 			seg.Image = nil
+			seg.colorImage = nil
+			seg.ColorPalette = nil
 			seg.PatternDict = nil
 			seg.SymbolDict = nil
 			seg.HuffmanTable = nil

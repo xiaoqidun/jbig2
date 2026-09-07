@@ -14,6 +14,11 @@
 
 package jbig2
 
+import (
+	"image"
+	"image/color"
+)
+
 // JBig2SegmentState 段状态
 type JBig2SegmentState int
 
@@ -34,6 +39,7 @@ const (
 	JBig2SymbolDictPointer   JBig2ResultType = 2
 	JBig2PatternDictPointer  JBig2ResultType = 3
 	JBig2HuffmanTablePointer JBig2ResultType = 4
+	JBig2ColorPalettePointer JBig2ResultType = 5
 )
 
 // SegmentFlags 段标志位
@@ -45,6 +51,7 @@ type SegmentFlags struct {
 
 // Segment 段结构
 type Segment struct {
+	colorImage               *image.NRGBA64
 	Number                   uint32
 	Flags                    SegmentFlags
 	ReferredToSegmentCount   int32
@@ -60,6 +67,7 @@ type Segment struct {
 	PatternDict              *PatternDict
 	Image                    *Image
 	HuffmanTable             *HuffmanTable
+	ColorPalette             []color.NRGBA64
 	GBContexts               []ArithCtx
 	GRContexts               []ArithCtx
 }

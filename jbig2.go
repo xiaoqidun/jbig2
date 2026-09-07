@@ -200,7 +200,7 @@ func (d *Decoder) Decode() (image.Image, error) {
 			if d.doc.inPage && d.doc.page != nil {
 				d.doc.inPage = false
 				d.pageIndex++
-				img := d.doc.page.ToGoImage()
+				img := d.doc.pageImage()
 				if !d.doc.Grouped {
 					d.doc.ReleasePageSegments(d.pageIndex)
 				}
@@ -213,7 +213,7 @@ func (d *Decoder) Decode() (image.Image, error) {
 				return nil, errors.New("page completed but no image found")
 			}
 			d.pageIndex++
-			img := d.doc.page.ToGoImage()
+			img := d.doc.pageImage()
 			if !d.doc.Grouped {
 				d.doc.ReleasePageSegments(d.pageIndex)
 			}
@@ -270,10 +270,18 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	for {
 		if len(dec.doc.pageInfoList) > 0 {
 			info := dec.doc.pageInfoList[0]
+			var model color.Model = color.GrayModel
+			if dec.doc.colorPage != nil {
+				model = color.NRGBA64Model
+			}
+			height := info.Height
+			if height == 0xFFFFFFFF {
+				height = uint32(dec.doc.page.Height())
+			}
 			return image.Config{
-				ColorModel: color.GrayModel,
+				ColorModel: model,
 				Width:      int(info.Width),
-				Height:     int(info.Height),
+				Height:     int(height),
 			}, nil
 		}
 		res := dec.doc.DecodeSequential()

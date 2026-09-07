@@ -16,6 +16,7 @@ package jbig2
 
 import (
 	"errors"
+	"image"
 )
 
 // ComposeData 混合数据
@@ -36,6 +37,8 @@ const (
 
 // TRDProc 文本区域解码过程
 type TRDProc struct {
+	colorImage         *image.NRGBA64
+	colorRuns          []colorRun
 	implicitRefinement bool
 	SBHUFF             bool
 	SBREFINE           bool
@@ -297,6 +300,11 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 				SI := int32(CURS)
 				compose := t.GetComposeData(SI, TI, WI, HI)
 				IBI.ComposeTo(sbReg, int32(compose.x), int32(compose.y), t.SBCOMBOP)
+				if t.colorImage != nil {
+					if err := t.paintColorSymbol(IBI, compose.x, compose.y); err != nil {
+						return nil, err
+					}
+				}
 				CURS += int64(compose.increment)
 				NINSTANCES++
 			}
@@ -497,6 +505,11 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 				SI := int32(CURS)
 				compose := t.GetComposeData(SI, TI, WI, HI)
 				IBI.ComposeTo(sbReg, int32(compose.x), int32(compose.y), t.SBCOMBOP)
+				if t.colorImage != nil {
+					if err := t.paintColorSymbol(IBI, compose.x, compose.y); err != nil {
+						return nil, err
+					}
+				}
 				if compose.increment > 0 {
 					CURS += int64(compose.increment)
 				}
