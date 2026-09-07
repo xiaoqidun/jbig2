@@ -20,21 +20,22 @@ import (
 
 // SDDProc 符号字典解码过程
 type SDDProc struct {
-	SDHUFF        bool
-	SDREFAGG      bool
-	SDMMR         bool
-	SDRTEMPLATE   bool
-	SDTEMPLATE    uint8
-	SDNUMINSYMS   uint32
-	SDNUMNEWSYMS  uint32
-	SDNUMEXSYMS   uint32
-	SDINSYMS      []*Image
-	SDHUFFDH      *HuffmanTable
-	SDHUFFDW      *HuffmanTable
-	SDHUFFBMSIZE  *HuffmanTable
-	SDHUFFAGGINST *HuffmanTable
-	SDAT          [8]int8
-	SDRAT         [4]int8
+	implicitRefinement bool
+	SDHUFF             bool
+	SDREFAGG           bool
+	SDMMR              bool
+	SDRTEMPLATE        bool
+	SDTEMPLATE         uint8
+	SDNUMINSYMS        uint32
+	SDNUMNEWSYMS       uint32
+	SDNUMEXSYMS        uint32
+	SDINSYMS           []*Image
+	SDHUFFDH           *HuffmanTable
+	SDHUFFDW           *HuffmanTable
+	SDHUFFBMSIZE       *HuffmanTable
+	SDHUFFAGGINST      *HuffmanTable
+	SDAT               [8]int8
+	SDRAT              [4]int8
 }
 
 // NewSDDProc 创建符号字典解码过程对象
@@ -178,7 +179,11 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					pGRRD.GRREFERENCEDY = RDYI
 					pGRRD.TPGRON = false
 					pGRRD.GRAT = s.SDRAT
-					BS, err = pGRRD.Decode(arithDecoder, grContexts)
+					if s.implicitRefinement && !s.SDRTEMPLATE {
+						BS, err = pGRRD.decodeReferenceTemplate0(arithDecoder, grContexts)
+					} else {
+						BS, err = pGRRD.Decode(arithDecoder, grContexts)
+					}
 					if err != nil {
 						return nil, err
 					}
@@ -186,16 +191,29 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 			}
 			SDNEWSYMS[NSYMSDECODED] = BS
 			NSYMSDECODED++
+			if s.implicitRefinement && NSYMSDECODED == s.SDNUMNEWSYMS {
+				break
+			}
 		}
 	}
 	EXFLAGS := make([]bool, s.SDNUMINSYMS+s.SDNUMNEWSYMS)
 	CUREXFLAG := false
 	EXINDEX := uint32(0)
 	num_ex_syms := uint32(0)
+	implicit := false
 	for EXINDEX < s.SDNUMINSYMS+s.SDNUMNEWSYMS {
 		EXRUNLENGTH, ok := IAEX.Decode(arithDecoder)
 		if !ok {
 			return nil, errors.New("failed to decode exrunlength")
+		}
+		stream := arithDecoder.stream
+		if EXINDEX == 0 && CUREXFLAG && EXRUNLENGTH == 0 && s.SDNUMEXSYMS == uint32(len(EXFLAGS)) &&
+			stream.GetByteLeft() == 1 && stream.GetCurByte() == 0xff {
+			for i := range EXFLAGS {
+				EXFLAGS[i] = true
+			}
+			implicit = true
+			break
 		}
 		if EXINDEX+uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS {
 			return nil, errors.New("exrunlength out of bounds")
@@ -213,6 +231,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 		return nil, errors.New("too many exported symbols")
 	}
 	dict := NewSymbolDict()
+	dict.implicitReferences = implicit
 	for i := uint32(0); i < s.SDNUMINSYMS+s.SDNUMNEWSYMS; i++ {
 		if !EXFLAGS[i] {
 			continue
@@ -237,6 +256,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {
 	huffmanDecoder := NewHuffmanDecoder(stream)
+	individualMMR := false
 	SDNEWSYMS := make([]*Image, s.SDNUMNEWSYMS)
 	var SDNEWSYMWIDTHS []uint32
 	if !s.SDREFAGG {
@@ -421,10 +441,23 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					return nil, errors.New("insufficient data for mmr")
 				}
 				mmrData := stream.GetPointer()[:BMSIZE]
+				mmrStart := stream.GetOffset()
 				stream.AddOffset(uint32(BMSIZE))
 				mmrStream := NewBitStream(mmrData, 0)
 				if pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError || BHC == nil {
-					return nil, errors.New("mmr decoding failure")
+					if BMSIZE != 1 {
+						return nil, errors.New("mmr decoding failure")
+					}
+					stream.SetOffset(mmrStart)
+					for i := HCFIRSTSYM; i < NSYMSDECODED; i++ {
+						var err error
+						SDNEWSYMS[i], err = NewMMRDecompressor(int(SDNEWSYMWIDTHS[i]), int(HCHEIGHT), stream).Uncompress()
+						if err != nil {
+							return nil, err
+						}
+					}
+					individualMMR = true
+					continue
 				}
 			}
 			if BHC != nil {
@@ -443,10 +476,19 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 	EXINDEX := uint32(0)
 	num_ex_syms := uint32(0)
 	pTable := NewStandardTable(1)
+	implicit := false
 	for EXINDEX < s.SDNUMINSYMS+s.SDNUMNEWSYMS {
 		var EXRUNLENGTH int32
 		if res := huffmanDecoder.DecodeAValue(pTable, &EXRUNLENGTH); res != 0 {
 			return nil, errors.New("failed to decode exrunlength")
+		}
+		if individualMMR && EXINDEX == 0 && CUREXFLAG && EXRUNLENGTH == 0 && s.SDNUMEXSYMS == uint32(len(EXFLAGS)) &&
+			stream.GetByteLeft() == 1 && stream.GetCurByte()&byte((1<<(8-stream.bitIdx))-1) == 0 {
+			for i := range EXFLAGS {
+				EXFLAGS[i] = true
+			}
+			implicit = true
+			break
 		}
 		if EXINDEX+uint32(EXRUNLENGTH) > s.SDNUMINSYMS+s.SDNUMNEWSYMS {
 			return nil, errors.New("exrunlength out of bounds")
@@ -464,6 +506,7 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 		return nil, errors.New("too many exported symbols")
 	}
 	dict := NewSymbolDict()
+	dict.implicitReferences = implicit
 	for i := uint32(0); i < s.SDNUMINSYMS+s.SDNUMNEWSYMS; i++ {
 		if !EXFLAGS[i] {
 			continue

@@ -16,9 +16,10 @@ package jbig2
 
 // SymbolDict 符号字典
 type SymbolDict struct {
-	gbContexts []ArithCtx
-	grContexts []ArithCtx
-	Images     []*Image
+	implicitReferences bool
+	gbContexts         []ArithCtx
+	grContexts         []ArithCtx
+	Images             []*Image
 }
 
 // NewSymbolDict 创建符号字典对象
@@ -31,6 +32,7 @@ func NewSymbolDict() *SymbolDict {
 // 返回: *SymbolDict 符号字典副本
 func (s *SymbolDict) DeepCopy() *SymbolDict {
 	dst := NewSymbolDict()
+	dst.implicitReferences = s.implicitReferences
 	for _, img := range s.Images {
 		if img != nil {
 			dst.Images = append(dst.Images, img.Duplicate())

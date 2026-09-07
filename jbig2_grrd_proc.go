@@ -62,6 +62,38 @@ func (g *GRRDProc) decodeInto(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 	return g.decodeTemplate1Opt(arithDecoder, grContexts, reuse)
 }
 
+// decodeReferenceTemplate0 解码参考软件使用的重复上行细化模板
+// 入参: decoder 算术解码器, contexts 上下文
+// 返回: *Image 图像, error 错误信息
+func (g *GRRDProc) decodeReferenceTemplate0(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
+	img := NewImage(int32(g.GRW), int32(g.GRH))
+	if img == nil {
+		return nil, errors.New("failed to create image")
+	}
+	for y := int32(0); y < int32(g.GRH); y++ {
+		for x := int32(0); x < int32(g.GRW); x++ {
+			rx, ry := x-g.GRREFERENCEDX, y-g.GRREFERENCEDY
+			var context uint32
+			for i := int32(0); i < 3; i++ {
+				context |= uint32(g.GRREFERENCE.GetPixel(rx+1-i, ry-1)) << uint(i)
+				context |= uint32(g.GRREFERENCE.GetPixel(rx+1-i, ry)) << uint(i+3)
+			}
+			context |= uint32(g.GRREFERENCE.GetPixel(rx+1, ry-1)) << 6
+			context |= uint32(g.GRREFERENCE.GetPixel(rx, ry-1)) << 7
+			context |= uint32(g.GRREFERENCE.GetPixel(rx+int32(g.GRAT[2]), ry+int32(g.GRAT[3]))) << 8
+			context |= uint32(img.GetPixel(x-1, y)) << 9
+			context |= uint32(img.GetPixel(x+1, y-1)) << 10
+			context |= uint32(img.GetPixel(x, y-1)) << 11
+			context |= uint32(img.GetPixel(x+int32(g.GRAT[0]), y+int32(g.GRAT[1]))) << 12
+			if decoder.IsComplete() {
+				return nil, errors.New("decoder complete prematurely")
+			}
+			img.SetPixel(x, y, decoder.Decode(&contexts[context]))
+		}
+	}
+	return img, nil
+}
+
 // decodeTemplate0Opt 模板0优化解码
 // 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息

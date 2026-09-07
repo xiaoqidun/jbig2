@@ -36,31 +36,32 @@ const (
 
 // TRDProc 文本区域解码过程
 type TRDProc struct {
-	SBHUFF         bool
-	SBREFINE       bool
-	SBRTEMPLATE    bool
-	TRANSPOSED     bool
-	SBDEFPIXEL     bool
-	SBDSOFFSET     int8
-	SBSYMCODELEN   uint8
-	SBW            uint32
-	SBH            uint32
-	SBNUMINSTANCES uint32
-	SBSTRIPS       uint32
-	SBNUMSYMS      uint32
-	SBSYMCODES     []HuffmanCode
-	SBSYMS         []*Image
-	SBCOMBOP       ComposeOp
-	REFCORNER      JBig2Corner
-	SBHUFFFS       *HuffmanTable
-	SBHUFFDS       *HuffmanTable
-	SBHUFFDT       *HuffmanTable
-	SBHUFFRDW      *HuffmanTable
-	SBHUFFRDH      *HuffmanTable
-	SBHUFFRDX      *HuffmanTable
-	SBHUFFRDY      *HuffmanTable
-	SBHUFFRSIZE    *HuffmanTable
-	SBRAT          [4]int8
+	implicitRefinement bool
+	SBHUFF             bool
+	SBREFINE           bool
+	SBRTEMPLATE        bool
+	TRANSPOSED         bool
+	SBDEFPIXEL         bool
+	SBDSOFFSET         int8
+	SBSYMCODELEN       uint8
+	SBW                uint32
+	SBH                uint32
+	SBNUMINSTANCES     uint32
+	SBSTRIPS           uint32
+	SBNUMSYMS          uint32
+	SBSYMCODES         []HuffmanCode
+	SBSYMS             []*Image
+	SBCOMBOP           ComposeOp
+	REFCORNER          JBig2Corner
+	SBHUFFFS           *HuffmanTable
+	SBHUFFDS           *HuffmanTable
+	SBHUFFDT           *HuffmanTable
+	SBHUFFRDW          *HuffmanTable
+	SBHUFFRDH          *HuffmanTable
+	SBHUFFRDX          *HuffmanTable
+	SBHUFFRDY          *HuffmanTable
+	SBHUFFRSIZE        *HuffmanTable
+	SBRAT              [4]int8
 }
 
 // IntDecoderState 整数解码器状态
@@ -413,7 +414,7 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 				break
 			}
 			CURT := int32(0)
-			if t.SBSTRIPS != 1 {
+			if t.SBSTRIPS != 1 && !(t.implicitRefinement && t.SBREFINE) {
 				res, ok := pIAIT.Decode(arithDecoder)
 				if !ok {
 					return nil, errors.New("iait decode failed")
@@ -421,6 +422,9 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 				CURT = res
 			}
 			TI := int32(STRIPT + int64(CURT))
+			if t.implicitRefinement && t.SBREFINE {
+				TI = 0
+			}
 			IDI, err := pIAID.Decode(arithDecoder)
 			if err != nil {
 				return nil, err

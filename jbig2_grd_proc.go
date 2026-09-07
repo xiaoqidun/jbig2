@@ -25,9 +25,11 @@ type GRDProc struct {
 	GBH         uint32
 	GBTEMPLATE  uint8
 	TPGDON      bool
+	EXTTEMPLATE bool
 	USESKIP     bool
 	SKIP        *Image
 	GBAT        [8]int8
+	GBATEXT     [16]int8
 	loopIndex   uint32
 	line        []byte
 	decodeType  uint16
@@ -131,7 +133,9 @@ func (g *GRDProc) ProgressiveDecodeArith(state *ProgressiveArithDecodeState) JBi
 	var res JBig2SegmentState
 	switch g.GBTEMPLATE {
 	case 0:
-		if g.useTemplate0Opt3() {
+		if g.EXTTEMPLATE {
+			res = g.decodeTemplate0Extended(state)
+		} else if g.useTemplate0Opt3() {
 			res = g.decodeTemplate0Opt3(state)
 		} else {
 			res = g.decodeTemplate0Unopt(state)

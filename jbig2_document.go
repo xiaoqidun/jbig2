@@ -221,6 +221,11 @@ func (d *Document) ParseSegmentData(segment *Segment) Result {
 	if segment.DataLength != 0xFFFFFFFF && segment.DataLength > d.stream.GetByteLeft() {
 		return ResultFailure
 	}
+	if segment.DataLength != 0xFFFFFFFF {
+		data := d.stream.data
+		d.stream.data = data[:d.stream.GetOffset()+segment.DataLength]
+		defer func() { d.stream.data = data }()
+	}
 	switch segment.Flags.Type {
 	case 0:
 		return d.parseSymbolDict(segment)
@@ -364,6 +369,7 @@ func (d *Document) decodeGrouped() Result {
 // 入参: segment 段对象
 // 返回: Result 解析结果
 func (d *Document) parseSymbolDict(segment *Segment) Result {
+	refNumbers := segment.ReferredToSegmentNumbers
 	var flags uint16
 	if val, err := d.stream.ReadShortInteger(); err != nil {
 		return ResultFailure
@@ -375,6 +381,12 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	sdd.SDREFAGG = (flags & 0x0002) != 0
 	sdd.SDTEMPLATE = uint8((flags >> 10) & 0x0003)
 	sdd.SDRTEMPLATE = (flags & 0x1000) != 0
+	if sdd.SDREFAGG && len(refNumbers) == 0 {
+		if ref := d.findImplicitSymbolDict(segment.PageAssociation); ref != nil {
+			refNumbers = []uint32{ref.Number}
+			sdd.implicitRefinement = true
+		}
+	}
 	if !sdd.SDHUFF {
 		dwTemp := 2
 		if sdd.SDTEMPLATE == 0 {
@@ -411,8 +423,8 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 		return ResultFailure
 	}
 	var inputSymbols []*Image
-	if segment.ReferredToSegmentCount > 0 {
-		for _, refNum := range segment.ReferredToSegmentNumbers {
+	if len(refNumbers) > 0 {
+		for _, refNum := range refNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg == nil {
 				return ResultFailure
@@ -436,7 +448,7 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 			return ResultFailure
 		}
 		var tableSegments []*Segment
-		for _, refNum := range segment.ReferredToSegmentNumbers {
+		for _, refNum := range refNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg != nil && seg.Flags.Type == 53 {
 				tableSegments = append(tableSegments, seg)
@@ -509,8 +521,8 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	var gbContexts, grContexts []ArithCtx
 	contextUsed := (flags & 0x0100) != 0
 	if contextUsed {
-		for i := len(segment.ReferredToSegmentNumbers) - 1; i >= 0; i-- {
-			refSeg := d.FindSegmentByNumber(segment.ReferredToSegmentNumbers[i])
+		for i := len(refNumbers) - 1; i >= 0; i-- {
+			refSeg := d.FindSegmentByNumber(refNumbers[i])
 			if refSeg == nil || refSeg.Flags.Type != 0 {
 				continue
 			}
@@ -550,6 +562,22 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	return ResultSuccess
 }
 
+// findImplicitSymbolDict 查找同页省略引用的符号字典
+// 入参: page 页号
+// 返回: *Segment 符号字典段
+func (d *Document) findImplicitSymbolDict(page uint32) *Segment {
+	for i := len(d.segmentList) - 1; i >= 0; i-- {
+		seg := d.segmentList[i]
+		if seg.PageAssociation == page && seg.SymbolDict != nil {
+			if seg.SymbolDict.implicitReferences {
+				return seg
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
 // ParseRegionInfo 解析区域信息
 // 入参: ri 区域信息
 // 返回: Result 结果
@@ -578,6 +606,9 @@ func (d *Document) ParseRegionInfo(ri *RegionInfo) Result {
 		return ResultFailure
 	} else {
 		ri.Flags = val
+	}
+	if ri.Flags&0x08 != 0 {
+		return ResultFailure
 	}
 	return ResultSuccess
 }
@@ -642,6 +673,13 @@ func (d *Document) GetHuffmanTable(idx int) *HuffmanTable {
 // 入参: SBNUMSYMS 符号数
 // 返回: []HuffmanCode 霍夫曼编码切片
 func (d *Document) DecodeSymbolIDHuffmanTable(SBNUMSYMS uint32) []HuffmanCode {
+	return d.decodeSymbolIDHuffmanTable(SBNUMSYMS, false)
+}
+
+// decodeSymbolIDHuffmanTable 解码符号ID及可选的游程前缀
+// 入参: SBNUMSYMS 符号数, includeRunCode 是否保留游程前缀
+// 返回: []HuffmanCode 霍夫曼编码切片
+func (d *Document) decodeSymbolIDHuffmanTable(SBNUMSYMS uint32, includeRunCode bool) []HuffmanCode {
 	kRunCodesSize := 35
 	huffmanCodes := make([]HuffmanCode, kRunCodesSize)
 	for i := 0; i < kRunCodesSize; i++ {
@@ -669,6 +707,9 @@ func (d *Document) DecodeSymbolIDHuffmanTable(SBNUMSYMS uint32) []HuffmanCode {
 		var run int32
 		if runcode < 32 {
 			SBSYMCODES[i].Codelen = runcode
+			if includeRunCode {
+				SBSYMCODES[i].Codelen += huffmanCodes[j].Codelen
+			}
 			run = 0
 		} else if runcode == 32 {
 			val, err := d.stream.ReadNBits(2)
@@ -715,6 +756,28 @@ func (d *Document) DecodeSymbolIDHuffmanTable(SBNUMSYMS uint32) []HuffmanCode {
 // 入参: segment 段对象
 // 返回: Result 解析结果
 func (d *Document) parseTextRegion(segment *Segment) Result {
+	start := *d.stream
+	result := d.parseTextRegionData(segment, false)
+	if result != ResultFailure || start.GetByteLeft() < 19 ||
+		readUint16(start.data[start.GetOffset()+17:], start.littleEndian)&1 == 0 {
+		return result
+	}
+	*d.stream = start
+	return d.parseTextRegionData(segment, true)
+}
+
+// parseTextRegionData 解析文本区域数据
+// 入参: segment 段对象, includeRunCode 是否保留游程前缀
+// 返回: Result 解析结果
+func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Result {
+	refNumbers := segment.ReferredToSegmentNumbers
+	implicit := false
+	if len(refNumbers) == 0 {
+		if ref := d.findImplicitSymbolDict(segment.PageAssociation); ref != nil {
+			refNumbers = []uint32{ref.Number}
+			implicit = true
+		}
+	}
 	var ri RegionInfo
 	if d.ParseRegionInfo(&ri) != ResultSuccess {
 		return ResultFailure
@@ -726,6 +789,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		flags = val
 	}
 	pTRD := NewTRDProc()
+	pTRD.implicitRefinement = implicit
 	pTRD.SBW = uint32(ri.Width)
 	pTRD.SBH = uint32(ri.Height)
 	pTRD.SBHUFF = (flags & 0x0001) != 0
@@ -763,8 +827,8 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 	} else {
 		pTRD.SBNUMINSTANCES = val
 	}
-	if segment.ReferredToSegmentCount > 0 {
-		for _, refNum := range segment.ReferredToSegmentNumbers {
+	if len(refNumbers) > 0 {
+		for _, refNum := range refNumbers {
 			if d.FindSegmentByNumber(refNum) == nil {
 				return ResultFailure
 			}
@@ -773,7 +837,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 	dwNumSyms := uint32(0)
 	var singleDict *SymbolDict
 	dictCount := 0
-	for _, refNum := range segment.ReferredToSegmentNumbers {
+	for _, refNum := range refNumbers {
 		seg := d.FindSegmentByNumber(refNum)
 		if seg != nil && seg.Flags.Type == 0 && seg.SymbolDict != nil {
 			dwNumSyms += uint32(seg.SymbolDict.NumImages())
@@ -787,7 +851,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 	} else {
 		SBSYMS := make([]*Image, pTRD.SBNUMSYMS)
 		dwNumSyms = 0
-		for _, refNum := range segment.ReferredToSegmentNumbers {
+		for _, refNum := range refNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg != nil && seg.Flags.Type == 0 && seg.SymbolDict != nil {
 				dict := seg.SymbolDict
@@ -800,7 +864,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		pTRD.SBSYMS = SBSYMS
 	}
 	if pTRD.SBHUFF {
-		if encodedTable := d.DecodeSymbolIDHuffmanTable(pTRD.SBNUMSYMS); encodedTable != nil {
+		if encodedTable := d.decodeSymbolIDHuffmanTable(pTRD.SBNUMSYMS, includeRunCode); encodedTable != nil {
 			d.stream.AlignByte()
 			pTRD.SBSYMCODES = encodedTable
 		} else {
@@ -830,7 +894,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		}
 		tableIdx := 0
 		var tableSegments []*Segment
-		for _, refNum := range segment.ReferredToSegmentNumbers {
+		for _, refNum := range refNumbers {
 			seg := d.FindSegmentByNumber(refNum)
 			if seg != nil && seg.Flags.Type == 53 {
 				tableSegments = append(tableSegments, seg)
@@ -916,6 +980,9 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 	var target *Image
 	if directToPage {
 		target = d.page
+		if includeRunCode {
+			target.Fill(pTRD.SBDEFPIXEL)
+		}
 	}
 	var err error
 	if pTRD.SBHUFF {
@@ -1123,6 +1190,7 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	pGRD.MMR = (flags & 0x01) != 0
 	pGRD.GBTEMPLATE = (flags >> 1) & 0x03
 	pGRD.TPGDON = ((flags >> 3) & 0x01) != 0
+	pGRD.EXTTEMPLATE = (flags & 0x10) != 0
 	if !pGRD.MMR {
 		if pGRD.GBTEMPLATE == 0 {
 			for i := 0; i < 8; i++ {
@@ -1130,6 +1198,15 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 					return ResultFailure
 				} else {
 					pGRD.GBAT[i] = int8(val)
+				}
+			}
+			if pGRD.EXTTEMPLATE {
+				for i := range pGRD.GBATEXT {
+					if val, err := d.stream.Read1Byte(); err != nil {
+						return ResultFailure
+					} else {
+						pGRD.GBATEXT[i] = int8(val)
+					}
 				}
 			}
 		} else {
