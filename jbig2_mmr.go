@@ -22,7 +22,7 @@ import (
 	"golang.org/x/image/ccitt"
 )
 
-// DecodeG4 使用CCITT Group 4解码位流到图像
+// DecodeG4 使用CCITT Group4解码位流到图像
 // 入参: stream 位流, image 目标图像
 // 返回: error 错误信息
 func DecodeG4(stream *BitStream, image *Image) error {
