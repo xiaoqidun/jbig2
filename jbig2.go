@@ -326,11 +326,20 @@ func (i *Image) ToGoImage() image.Image {
 	rect := image.Rect(0, 0, int(i.width), int(i.height))
 	img := image.NewGray(rect)
 	w, h := int(i.width), int(i.height)
+	fullBytes := w >> 3
 	for y := 0; y < h; y++ {
 		src := i.data[int32(y)*i.stride:]
 		dst := img.Pix[y*img.Stride:]
-		fullBytes := w >> 3
-		for byteIndex := 0; byteIndex < fullBytes; byteIndex++ {
+		byteIndex := 0
+		for ; byteIndex+4 <= fullBytes; byteIndex += 4 {
+			srcBlock := src[byteIndex : byteIndex+4]
+			dstBlock := dst[byteIndex<<3 : (byteIndex+4)<<3]
+			binary.BigEndian.PutUint64(dstBlock, expandGrayByte(srcBlock[0]))
+			binary.BigEndian.PutUint64(dstBlock[8:], expandGrayByte(srcBlock[1]))
+			binary.BigEndian.PutUint64(dstBlock[16:], expandGrayByte(srcBlock[2]))
+			binary.BigEndian.PutUint64(dstBlock[24:], expandGrayByte(srcBlock[3]))
+		}
+		for ; byteIndex < fullBytes; byteIndex++ {
 			x := byteIndex << 3
 			binary.BigEndian.PutUint64(dst[x:], expandGrayByte(src[byteIndex]))
 		}
