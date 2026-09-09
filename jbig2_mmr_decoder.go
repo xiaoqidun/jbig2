@@ -35,7 +35,7 @@ const (
 	mmrInvalid = -2
 )
 
-// mmrCode MMR 编码字
+// mmrCode MMR编码字
 type mmrCode struct {
 	bitLength int
 	codeWord  int
@@ -153,14 +153,14 @@ func createLittleEndianTable(codes [][]int) []*mmrCode {
 	return table
 }
 
-// MMRDecompressor MMR 解码器
+// MMRDecompressor MMR解码器
 type MMRDecompressor struct {
 	width  int
 	height int
 	stream *BitStream
 }
 
-// NewMMRDecompressor 创建新的 MMR 解码器
+// NewMMRDecompressor 创建新的MMR解码器
 // 入参: width 宽度, height 高度, stream 位流
 // 返回: *MMRDecompressor 解码器对象
 func NewMMRDecompressor(width, height int, stream *BitStream) *MMRDecompressor {
@@ -228,7 +228,7 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	return img, nil
 }
 
-// uncompress2D 2D 解压缩一行
+// uncompress2D 2D解压缩一行
 // 入参: refOffsets 参考行偏移, refRunLength 参考行游程长度, currOffsets 当前行偏移
 // 返回: int 偏移计数, error 错误信息
 func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currOffsets []int) (int, error) {
@@ -362,7 +362,7 @@ func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int
 	}
 }
 
-// detectAndSkipEOL 检测并跳过 EOL
+// detectAndSkipEOL 检测并跳过EOL
 func (m *MMRDecompressor) detectAndSkipEOL() {
 	for {
 		code, err := m.getNextCode(modeTable)
