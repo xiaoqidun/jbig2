@@ -61,9 +61,20 @@ func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2S
 		line2 |= getPixelFromRow(row1, 1, img.width) << 1
 		line2 |= getPixelFromRow(row1, 0, img.width) << 2
 		var line3 uint32
+		interiorEnd := img.width - 3
+		if row1 == nil || row2 == nil {
+			interiorEnd = 0
+		}
 		for w := int32(0); w < int32(g.GBW); w++ {
 			bVal := 0
-			row1Next := getPixelFromRow(row1, w+3, img.width)
+			var row1Next, row2Next uint32
+			if w < interiorEnd {
+				row1Next = getPixelFromRowUnchecked(row1, w+3)
+				row2Next = getPixelFromRowUnchecked(row2, w+3)
+			} else {
+				row1Next = getPixelFromRow(row1, w+3, img.width)
+				row2Next = getPixelFromRow(row2, w+3, img.width)
+			}
 			if !g.USESKIP || g.SKIP == nil || g.SKIP.GetPixel(w, h) == 0 {
 				if decoder.IsComplete() {
 					return JBig2SegmentError
@@ -77,7 +88,7 @@ func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2S
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			line1 = ((line1 << 1) | getPixelFromRow(row2, w+3, img.width)) & 0x1f
+			line1 = ((line1 << 1) | row2Next) & 0x1f
 			line2 = ((line2 << 1) | row1Next) & 0x3f
 			line3 = ((line3 << 1) | uint32(bVal)) & 0x0f
 		}

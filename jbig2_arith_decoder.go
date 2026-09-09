@@ -40,6 +40,26 @@ var kQeTable = [128]ArithQe{
 	{0x0001, 45, 43, false}, {0x5601, 46, 46, false},
 }
 
+// arithDecodeState 算术解码状态
+type arithDecodeState struct {
+	qe   uint32
+	nmps uint8
+	nlps uint8
+}
+
+// arithDecodeStates 算术解码状态表
+var arithDecodeStates = func() (table [256]arithDecodeState) {
+	for state := range table {
+		qe := kQeTable[state>>1]
+		mps := uint8(state & 1)
+		table[state] = arithDecodeState{uint32(qe.Qe), qe.NMPS<<1 | mps, qe.NLPS<<1 | mps}
+		if qe.Switch {
+			table[state].nlps ^= 1
+		}
+	}
+	return
+}()
+
 // arithIntDecodeData 算术整数解码数据
 type arithIntDecodeData struct {
 	nNeedBits int
@@ -125,28 +145,31 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 // 入参: cx 上下文
 // 返回: int 结果
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
-	qe := &kQeTable[cx.state>>1]
-	qeValue := uint32(qe.Qe)
+	qe := &arithDecodeStates[cx.state]
+	qeValue := qe.qe
+	mps := int(cx.state & 1)
 	ad.a -= qeValue
 	if (ad.c >> 16) < ad.a {
 		if (ad.a & defaultAValue) != 0 {
-			return cx.MPS()
+			return mps
 		}
-		var d int
+		d := mps
 		if ad.a < qeValue {
-			d = cx.DecodeNLPS(*qe)
+			d ^= 1
+			cx.state = qe.nlps
 		} else {
-			d = cx.DecodeNMPS(*qe)
+			cx.state = qe.nmps
 		}
 		ad.readValueA()
 		return d
 	}
 	ad.c -= ad.a << 16
-	var d int
+	d := mps
 	if ad.a < qeValue {
-		d = cx.DecodeNMPS(*qe)
+		cx.state = qe.nmps
 	} else {
-		d = cx.DecodeNLPS(*qe)
+		d ^= 1
+		cx.state = qe.nlps
 	}
 	ad.a = qeValue
 	ad.readValueA()
