@@ -655,7 +655,7 @@ func (d *Document) expandPageForRegion(ri *RegionInfo) {
 		return
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
-	if !pi.IsStriped {
+	if !pi.IsStriped || pi.Height != 0xFFFFFFFF {
 		return
 	}
 	newHeight := int64(ri.Y) + int64(ri.Height)
