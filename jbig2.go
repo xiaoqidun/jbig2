@@ -268,7 +268,7 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 			}, nil
 		}
 		res := dec.doc.DecodeSequential()
-		if res == ResultEndReached {
+		if res == ResultEndReached && len(dec.doc.pageInfoList) == 0 {
 			break
 		}
 		if res == ResultFailure {
