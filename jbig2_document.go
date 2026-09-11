@@ -1409,6 +1409,7 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	if segment.Flags.Type != 40 {
 		d.expandPageForRegion(&ri)
 		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
+		segment.Image = nil
 		d.pageWritten = true
 	}
 	return ResultSuccess
