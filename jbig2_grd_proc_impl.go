@@ -78,7 +78,11 @@ func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2S
 				row1Next := (window1 >> shift) & 1
 				row2Next := (window2 >> shift) & 1
 				context |= row1Next << 4
-				bVal := decoder.Decode(&gbContexts[context])
+				cx := &gbContexts[context]
+				bVal, ok := decoder.tryDecodeFast(cx)
+				if !ok {
+					bVal = decoder.Decode(cx)
+				}
 				if bVal != 0 {
 					*output |= 1 << (shift - 5)
 				}

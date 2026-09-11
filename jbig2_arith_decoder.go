@@ -176,6 +176,18 @@ func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
 	return d
 }
 
+// tryDecodeFast 尝试无需重归一化的MPS解码
+// 入参: cx 上下文
+// 返回: int 解码值, bool 是否命中快速路径
+func (ad *ArithDecoder) tryDecodeFast(cx *ArithCtx) (int, bool) {
+	a := ad.a - arithDecodeStates[cx.state].qe
+	if (ad.c>>16) < a && (a&defaultAValue) != 0 {
+		ad.a = a
+		return int(cx.state & 1), true
+	}
+	return 0, false
+}
+
 // IsComplete 是否完成
 // 返回: bool 是否完成
 func (ad *ArithDecoder) IsComplete() bool {
