@@ -60,37 +60,47 @@ func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2S
 		line2 := getPixelFromRow(row1, 2, img.width)
 		line2 |= getPixelFromRow(row1, 1, img.width) << 1
 		line2 |= getPixelFromRow(row1, 0, img.width) << 2
-		var line3 uint32
-		interiorEnd := img.width - 3
-		if row1 == nil || row2 == nil {
+		context := line2<<5 | line1<<11
+		interiorEnd := min(int32(g.GBW), img.width-3) &^ 7
+		if row1 == nil || row2 == nil || g.USESKIP && g.SKIP != nil {
 			interiorEnd = 0
 		}
-		for w := int32(0); w < int32(g.GBW); w++ {
-			bVal := 0
-			var row1Next, row2Next uint32
-			if w < interiorEnd {
-				row1Next = getPixelFromRowUnchecked(row1, w+3)
-				row2Next = getPixelFromRowUnchecked(row2, w+3)
-			} else {
-				row1Next = getPixelFromRow(row1, w+3, img.width)
-				row2Next = getPixelFromRow(row2, w+3, img.width)
+		w := int32(0)
+		for w < interiorEnd {
+			index := w >> 3
+			window1 := uint32(row1[index])<<8 | uint32(row1[index+1])
+			window2 := uint32(row2[index])<<8 | uint32(row2[index+1])
+			output := &row[index]
+			for shift := uint(12); shift >= 5; shift-- {
+				if decoder.IsComplete() {
+					return JBig2SegmentError
+				}
+				row1Next := (window1 >> shift) & 1
+				row2Next := (window2 >> shift) & 1
+				context |= row1Next << 4
+				bVal := decoder.Decode(&gbContexts[context])
+				if bVal != 0 {
+					*output |= 1 << (shift - 5)
+				}
+				context = (context<<1)&0xf7ee | row2Next<<11 | uint32(bVal)
 			}
+			w += 8
+		}
+		for ; w < int32(g.GBW); w++ {
+			bVal := 0
+			row1Next := getPixelFromRow(row1, w+3, img.width)
+			row2Next := getPixelFromRow(row2, w+3, img.width)
+			context |= row1Next << 4
 			if !g.USESKIP || g.SKIP == nil || g.SKIP.GetPixel(w, h) == 0 {
 				if decoder.IsComplete() {
 					return JBig2SegmentError
 				}
-				context := line3
-				context |= row1Next << 4
-				context |= line2 << 5
-				context |= line1 << 11
 				bVal = decoder.Decode(&gbContexts[context])
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			line1 = ((line1 << 1) | row2Next) & 0x1f
-			line2 = ((line2 << 1) | row1Next) & 0x3f
-			line3 = ((line3 << 1) | uint32(bVal)) & 0x0f
+			context = (context<<1)&0xf7ee | row2Next<<11 | uint32(bVal)
 		}
 	}
 	return JBig2SegmentParseComplete
