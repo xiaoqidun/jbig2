@@ -31,7 +31,6 @@ type GRDProc struct {
 	GBAT        [8]int8
 	GBATEXT     [16]int8
 	loopIndex   uint32
-	line        []byte
 	decodeType  uint16
 	ltp         int
 	replaceRect Rect
@@ -69,7 +68,6 @@ func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2Segm
 	}
 	g.decodeType = 1
 	g.ltp = 0
-	g.line = nil
 	g.loopIndex = 0
 	return g.ProgressiveDecodeArith(state)
 }

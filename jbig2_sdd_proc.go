@@ -230,25 +230,26 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	if num_ex_syms > s.SDNUMEXSYMS {
 		return nil, errors.New("too many exported symbols")
 	}
+	return s.exportSymbols(SDNEWSYMS, EXFLAGS, implicit), nil
+}
+
+// exportSymbols 构建导出符号字典
+// 入参: symbols 新符号, flags 导出标志, implicit 隐式引用标志
+// 返回: *SymbolDict 符号字典
+func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, implicit bool) *SymbolDict {
 	dict := NewSymbolDict()
 	dict.implicitReferences = implicit
 	for i := uint32(0); i < s.SDNUMINSYMS+s.SDNUMNEWSYMS; i++ {
-		if !EXFLAGS[i] {
+		if !flags[i] {
 			continue
 		}
 		if i < s.SDNUMINSYMS {
-			img := s.SDINSYMS[i]
-			if img != nil {
-				newImg := img.Duplicate()
-				dict.AddImage(newImg)
-			} else {
-				dict.AddImage(nil)
-			}
+			dict.AddImage(s.SDINSYMS[i].Duplicate())
 		} else {
-			dict.AddImage(SDNEWSYMS[i-s.SDNUMINSYMS])
+			dict.AddImage(symbols[i-s.SDNUMINSYMS])
 		}
 	}
-	return dict, nil
+	return dict
 }
 
 // DecodeHuffman 霍夫曼解码
@@ -505,23 +506,5 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 	if num_ex_syms > s.SDNUMEXSYMS {
 		return nil, errors.New("too many exported symbols")
 	}
-	dict := NewSymbolDict()
-	dict.implicitReferences = implicit
-	for i := uint32(0); i < s.SDNUMINSYMS+s.SDNUMNEWSYMS; i++ {
-		if !EXFLAGS[i] {
-			continue
-		}
-		if i < s.SDNUMINSYMS {
-			img := s.SDINSYMS[i]
-			if img != nil {
-				newImg := img.Duplicate()
-				dict.AddImage(newImg)
-			} else {
-				dict.AddImage(nil)
-			}
-		} else {
-			dict.AddImage(SDNEWSYMS[i-s.SDNUMINSYMS])
-		}
-	}
-	return dict, nil
+	return s.exportSymbols(SDNEWSYMS, EXFLAGS, implicit), nil
 }

@@ -78,6 +78,13 @@ func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx)
 	if status == JBig2SegmentError || bhdc == nil {
 		return nil, errors.New("arith decoding failure")
 	}
+	return p.createPatternDict(bhdc), nil
+}
+
+// createPatternDict 构建模式字典
+// 入参: bhdc 集合位图
+// 返回: *PatternDict 模式字典对象
+func (p *PDDProc) createPatternDict(bhdc *Image) *PatternDict {
 	dict := NewPatternDict(p.GRAYMAX + 1)
 	hdpw := int32(p.HDPW)
 	hdph := int32(p.HDPH)
@@ -85,7 +92,7 @@ func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx)
 		subImg := bhdc.SubImage(int32(gray)*hdpw, 0, hdpw, hdph)
 		dict.HDPATS[gray] = subImg
 	}
-	return dict, nil
+	return dict
 }
 
 // DecodeMMR MMR解码
@@ -101,12 +108,5 @@ func (p *PDDProc) DecodeMMR(stream *BitStream) (*PatternDict, error) {
 	if status == JBig2SegmentError || bhdc == nil {
 		return nil, errors.New("mmr decoding failure")
 	}
-	dict := NewPatternDict(p.GRAYMAX + 1)
-	hdpw := int32(p.HDPW)
-	hdph := int32(p.HDPH)
-	for gray := uint32(0); gray <= p.GRAYMAX; gray++ {
-		subImg := bhdc.SubImage(int32(gray)*hdpw, 0, hdpw, hdph)
-		dict.HDPATS[gray] = subImg
-	}
-	return dict, nil
+	return p.createPatternDict(bhdc), nil
 }

@@ -51,7 +51,6 @@ type Document struct {
 	groupedParsed   bool
 	inPage          bool
 	pageWritten     bool
-	bufSpecified    bool
 	randomAccess    bool
 	Grouped         bool
 	OrgMode         int
@@ -301,15 +300,10 @@ func (d *Document) DecodeSequential() Result {
 			d.offset = d.stream.GetOffset()
 		}
 		ret := d.ParseSegmentData(d.segment)
-		if ret == ResultEndReached {
+		if ret == ResultEndReached || ret == ResultPageCompleted {
 			d.segmentList = append(d.segmentList, d.segment)
 			d.segment = nil
-			return ResultEndReached
-		}
-		if ret == ResultPageCompleted {
-			d.segmentList = append(d.segmentList, d.segment)
-			d.segment = nil
-			return ResultPageCompleted
+			return ret
 		}
 		if ret != ResultSuccess {
 			d.segment = nil
@@ -636,7 +630,7 @@ func composeOpFromRegionFlags(flags uint8) ComposeOp {
 // 入参: segment 段对象, ri 区域信息, trd 文本区域解码过程
 // 返回: bool 是否可直接解码
 func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo, trd *TRDProc) bool {
-	if d.colorPage != nil || d.pageWritten || d.bufSpecified || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
+	if d.colorPage != nil || d.pageWritten || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
 		return false
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
@@ -657,7 +651,7 @@ func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo,
 // expandPageForRegion 根据区域扩展页面
 // 入参: ri 区域信息
 func (d *Document) expandPageForRegion(ri *RegionInfo) {
-	if d.bufSpecified || d.page == nil || len(d.pageInfoList) == 0 {
+	if d.page == nil || len(d.pageInfoList) == 0 {
 		return
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
@@ -697,9 +691,6 @@ func (d *Document) decodeSymbolIDHuffmanTable(SBNUMSYMS uint32, includeRunCode b
 			return nil
 		}
 		huffmanCodes[i].Codelen = int32(val)
-	}
-	if err := HuffmanAssignCode(huffmanCodes); err != nil {
-		return nil
 	}
 	runDecoder, err := newHuffmanCodeIndex(huffmanCodes)
 	if err != nil {
@@ -1499,7 +1490,7 @@ func (d *Document) parseEndOfStripe() Result {
 		return ResultFailure
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
-	if pi.Height != 0xFFFFFFFF || d.bufSpecified {
+	if pi.Height != 0xFFFFFFFF {
 		return ResultSuccess
 	}
 	height := int32(line + 1)

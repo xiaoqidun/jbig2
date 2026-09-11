@@ -38,18 +38,7 @@ type Decoder struct {
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	data, err := readDecoderData(r)
-	if err != nil {
-		return nil, err
-	}
-	data, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
-	if data == nil {
-		return nil, errors.New("no valid jbig2 configuration found")
-	}
-	doc := NewDocument(data, nil, randomAccess, littleEndian)
-	doc.OrgMode = orgMode
-	doc.Grouped = grouped
-	return &Decoder{doc: doc, pageIndex: 0}, nil
+	return NewDecoderWithGlobals(r, nil)
 }
 
 // NewDecoderWithGlobals 创建带全局段的解码器
@@ -63,7 +52,6 @@ func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
 	probedData, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
 	if probedData == nil {
 		if len(globals) > 0 {
-			probedData = data
 			randomAccess = false
 			littleEndian = false
 			orgMode = 0
@@ -196,32 +184,27 @@ func (d *Decoder) Decode() (image.Image, error) {
 	}
 	for {
 		res := d.doc.DecodeSequential()
-		if res == ResultEndReached {
-			if d.doc.inPage && d.doc.page != nil {
-				d.doc.inPage = false
-				d.pageIndex++
-				img := d.doc.pageImage()
-				if !d.doc.Grouped {
-					d.doc.ReleasePageSegments(d.pageIndex)
-				}
-				return img, nil
+		switch res {
+		case ResultEndReached:
+			if !d.doc.inPage || d.doc.page == nil {
+				return nil, io.EOF
 			}
-			return nil, io.EOF
-		}
-		if res == ResultPageCompleted {
+			d.doc.inPage = false
+		case ResultPageCompleted:
 			if d.doc.page == nil {
 				return nil, errors.New("page completed but no image found")
 			}
-			d.pageIndex++
-			img := d.doc.pageImage()
-			if !d.doc.Grouped {
-				d.doc.ReleasePageSegments(d.pageIndex)
-			}
-			return img, nil
-		}
-		if res == ResultFailure {
+		case ResultFailure:
 			return nil, errors.New("decoding failed")
+		default:
+			continue
 		}
+		d.pageIndex++
+		img := d.doc.pageImage()
+		if !d.doc.Grouped {
+			d.doc.ReleasePageSegments(d.pageIndex)
+		}
+		return img, nil
 	}
 }
 

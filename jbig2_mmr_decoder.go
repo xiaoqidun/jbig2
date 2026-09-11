@@ -214,9 +214,6 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 		if err != nil {
 			return nil, err
 		}
-		if count == mmrEOF {
-			break
-		}
 		if count > 0 {
 			m.fillBitmap(img, y, currOffsets, count)
 		}
