@@ -212,6 +212,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 			for i := range EXFLAGS {
 				EXFLAGS[i] = true
 			}
+			num_ex_syms = uint32(len(EXFLAGS))
 			implicit = true
 			break
 		}
@@ -230,15 +231,18 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	if num_ex_syms > s.SDNUMEXSYMS {
 		return nil, errors.New("too many exported symbols")
 	}
-	return s.exportSymbols(SDNEWSYMS, EXFLAGS, implicit), nil
+	return s.exportSymbols(SDNEWSYMS, EXFLAGS, num_ex_syms, implicit), nil
 }
 
 // exportSymbols 构建导出符号字典
-// 入参: symbols 新符号, flags 导出标志, implicit 隐式引用标志
+// 入参: symbols 新符号, flags 导出标志, count 导出数量, implicit 隐式引用标志
 // 返回: *SymbolDict 符号字典
-func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, implicit bool) *SymbolDict {
+func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, count uint32, implicit bool) *SymbolDict {
 	dict := NewSymbolDict()
 	dict.implicitReferences = implicit
+	if count != 0 {
+		dict.Images = make([]*Image, 0, count)
+	}
 	for i := uint32(0); i < s.SDNUMINSYMS+s.SDNUMNEWSYMS; i++ {
 		if !flags[i] {
 			continue
@@ -488,6 +492,7 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 			for i := range EXFLAGS {
 				EXFLAGS[i] = true
 			}
+			num_ex_syms = uint32(len(EXFLAGS))
 			implicit = true
 			break
 		}
@@ -506,5 +511,5 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 	if num_ex_syms > s.SDNUMEXSYMS {
 		return nil, errors.New("too many exported symbols")
 	}
-	return s.exportSymbols(SDNEWSYMS, EXFLAGS, implicit), nil
+	return s.exportSymbols(SDNEWSYMS, EXFLAGS, num_ex_syms, implicit), nil
 }
