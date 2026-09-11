@@ -261,6 +261,7 @@ func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, count uint32, im
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {
 	huffmanDecoder := NewHuffmanDecoder(stream)
+	SBSYMCODELEN := uint32(ceilLog2(s.SDNUMINSYMS + s.SDNUMNEWSYMS))
 	individualMMR := false
 	SDNEWSYMS := make([]*Image, s.SDNUMNEWSYMS)
 	var SDNEWSYMWIDTHS []uint32
@@ -326,12 +327,8 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					pDecoder.SBSTRIPS = 1
 					pDecoder.SBNUMSYMS = s.SDNUMINSYMS + NSYMSDECODED
 					pDecoder.SBSYMCODES = make([]HuffmanCode, pDecoder.SBNUMSYMS)
-					nTmp := uint32(ceilLog2(pDecoder.SBNUMSYMS))
-					if nTmp == 0 {
-						nTmp = 1
-					}
 					for i := uint32(0); i < pDecoder.SBNUMSYMS; i++ {
-						pDecoder.SBSYMCODES[i].Codelen = int32(nTmp)
+						pDecoder.SBSYMCODES[i].Codelen = int32(SBSYMCODELEN)
 						pDecoder.SBSYMCODES[i].Code = int32(i)
 					}
 					pDecoder.SBSYMS = make([]*Image, pDecoder.SBNUMSYMS)
@@ -361,11 +358,6 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					}
 				} else if REFAGGNINST == 1 {
 					SBNUMSYMS := s.SDNUMINSYMS + NSYMSDECODED
-					nTmp := uint32(ceilLog2(SBNUMSYMS))
-					if nTmp == 0 {
-						nTmp = 1
-					}
-					SBSYMCODELEN := nTmp
 					IDI := uint32(0)
 					for n := uint32(0); n < SBSYMCODELEN; n++ {
 						val, err := stream.Read1Bit()
