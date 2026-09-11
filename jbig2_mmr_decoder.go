@@ -185,6 +185,9 @@ func (m *MMRDecompressor) getNextCode(table []*mmrCode) (*mmrCode, error) {
 		idx2 := (codeWord >> (codeOffset - firstLevelTableSize - secondLevelTableSize)) & secondLevelTableMask
 		res = res.subTable[idx2]
 	}
+	if res != nil && uint64(res.bitLength)+uint64(m.stream.bitIdx) > uint64(m.stream.GetByteLeft())*8 {
+		return nil, errors.New("insufficient mmr data")
+	}
 	return res, nil
 }
 
