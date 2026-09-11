@@ -87,40 +87,27 @@ func NewTRDProc() *TRDProc {
 // 返回: ComposeData 混合位置信息
 func (t *TRDProc) GetComposeData(SI, TI int32, WI, HI uint32) ComposeData {
 	var results ComposeData
-	s := SI
-	t_val := TI
 	if !t.TRANSPOSED {
-		results.x = s
-		results.y = t_val
-		switch t.REFCORNER {
-		case JBig2CornerBottomLeft:
-			results.y = t_val - int32(HI) + 1
-		case JBig2CornerBottomRight:
-			results.x = s - int32(WI) + 1
-			results.y = t_val - int32(HI) + 1
-		case JBig2CornerTopLeft:
-			results.x = s
-			results.y = t_val
-		case JBig2CornerTopRight:
-			results.x = s - int32(WI) + 1
+		results.x = SI
+		results.y = TI
+		if t.REFCORNER == JBig2CornerBottomLeft || t.REFCORNER == JBig2CornerTopLeft {
+			results.increment = int32(WI) - 1
 		}
-		results.increment = int32(WI) - 1
 	} else {
-		results.x = t_val
-		results.y = s
-		switch t.REFCORNER {
-		case JBig2CornerBottomLeft:
-			results.x = t_val - int32(HI) + 1
-		case JBig2CornerBottomRight:
-			results.x = t_val - int32(HI) + 1
-			results.y = s - int32(WI) + 1
-		case JBig2CornerTopLeft:
-			results.x = t_val
-			results.y = s
-		case JBig2CornerTopRight:
-			results.y = s - int32(WI) + 1
+		results.x = TI
+		results.y = SI
+		if t.REFCORNER == JBig2CornerTopLeft || t.REFCORNER == JBig2CornerTopRight {
+			results.increment = int32(HI) - 1
 		}
-		results.increment = int32(HI) - 1
+	}
+	switch t.REFCORNER {
+	case JBig2CornerBottomLeft:
+		results.y -= int32(HI) - 1
+	case JBig2CornerBottomRight:
+		results.x -= int32(WI) - 1
+		results.y -= int32(HI) - 1
+	case JBig2CornerTopRight:
+		results.x -= int32(WI) - 1
 	}
 	return results
 }
