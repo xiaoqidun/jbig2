@@ -208,16 +208,14 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 		refPreviousRow := g.GRREFERENCE.row(refY - 1)
 		refRow := g.GRREFERENCE.row(refY)
 		refNextRow := g.GRREFERENCE.row(refY + 1)
-		line1 := getPixelFromRow(previousRow, 1, width)
-		line1 |= getPixelFromRow(previousRow, 0, width) << 1
-		line1 |= getPixelFromRow(previousRow, -1, width) << 2
-		var line2 uint32
-		line3 := getPixelFromRow(refPreviousRow, referenceX, referenceWidth)
-		line4 := getPixelFromRow(refRow, referenceX+1, referenceWidth)
-		line4 |= getPixelFromRow(refRow, referenceX, referenceWidth) << 1
-		line4 |= getPixelFromRow(refRow, referenceX-1, referenceWidth) << 2
-		line5 := getPixelFromRow(refNextRow, referenceX+1, referenceWidth)
-		line5 |= getPixelFromRow(refNextRow, referenceX, referenceWidth) << 1
+		context := getPixelFromRow(previousRow, 1, width) << 7
+		context |= getPixelFromRow(previousRow, 0, width) << 8
+		context |= getPixelFromRow(refPreviousRow, referenceX, referenceWidth) << 5
+		context |= getPixelFromRow(refRow, referenceX+1, referenceWidth) << 2
+		context |= getPixelFromRow(refRow, referenceX, referenceWidth) << 3
+		context |= getPixelFromRow(refRow, referenceX-1, referenceWidth) << 4
+		context |= getPixelFromRow(refNextRow, referenceX+1, referenceWidth)
+		context |= getPixelFromRow(refNextRow, referenceX, referenceWidth) << 1
 		for w := int32(0); w < width; w++ {
 			bVal := 0
 			needDecode := ltp == 0
@@ -227,11 +225,6 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 				needDecode = !predictable
 			}
 			if needDecode {
-				context := line5
-				context |= line4 << 2
-				context |= line3 << 5
-				context |= line2 << 6
-				context |= line1 << 7
 				if decoder.IsComplete() {
 					return nil, errors.New("decoder complete prematurely")
 				}
@@ -240,11 +233,11 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 			if bVal != 0 {
 				setPixelInRow(row, w)
 			}
-			line1 = ((line1 << 1) | getPixelFromRow(previousRow, w+2, width)) & 0x07
-			line2 = ((line2 << 1) | uint32(bVal)) & 0x01
-			line3 = ((line3 << 1) | getPixelFromRow(refPreviousRow, referenceX+w+1, referenceWidth)) & 0x01
-			line4 = ((line4 << 1) | getPixelFromRow(refRow, referenceX+w+2, referenceWidth)) & 0x07
-			line5 = ((line5 << 1) | getPixelFromRow(refNextRow, referenceX+w+2, referenceWidth)) & 0x03
+			context = (context<<1)&0x031a | uint32(bVal)<<6 |
+				getPixelFromRow(previousRow, w+2, width)<<7 |
+				getPixelFromRow(refPreviousRow, referenceX+w+1, referenceWidth)<<5 |
+				getPixelFromRow(refRow, referenceX+w+2, referenceWidth)<<2 |
+				getPixelFromRow(refNextRow, referenceX+w+2, referenceWidth)
 		}
 	}
 	return grReg, nil
