@@ -36,8 +36,9 @@ func NewGRRDProc() *GRRDProc {
 	return &GRRDProc{}
 }
 
-// Decode 解码
-// 入参: arithDecoder 算术解码器, grContexts 上下文
+// Decode 解码通用细化区域
+// grContexts在模板0时为8192项，模板1时为1024项，解码过程中更新上下文
+// 入参: arithDecoder 算术解码器, grContexts 细化上下文
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*Image, error) {
 	return g.decodeInto(arithDecoder, grContexts, nil)

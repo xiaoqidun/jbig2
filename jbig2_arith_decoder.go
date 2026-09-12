@@ -106,14 +106,14 @@ func (c *ArithCtx) DecodeNMPS(qe ArithQe) int {
 	return int(mps)
 }
 
-// MPS 获取MPS
-// 返回: int MPS值
+// MPS 获取当前较大概率符号
+// 返回: int 符号值，取值为0或1
 func (c *ArithCtx) MPS() int {
 	return int(c.state & 1)
 }
 
-// I 获取I
-// 返回: uint8 I值
+// I 获取当前概率状态索引
+// 返回: uint8 状态索引
 func (c *ArithCtx) I() uint8 {
 	return c.state >> 1
 }
@@ -141,7 +141,7 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 	return ad
 }
 
-// Decode 解码
+// Decode 解码1位并更新上下文
 // 入参: cx 上下文
 // 返回: int 结果
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
@@ -188,8 +188,9 @@ func (ad *ArithDecoder) tryDecodeFast(cx *ArithCtx) (int, bool) {
 	return 0, false
 }
 
-// IsComplete 是否完成
-// 返回: bool 是否完成
+// IsComplete 是否已读取到位流末尾
+// 不表示整个页面已完成解码
+// 返回: bool 是否到达末尾
 func (ad *ArithDecoder) IsComplete() bool {
 	return ad.complete
 }
@@ -243,9 +244,9 @@ func NewArithIntDecoder() *ArithIntDecoder {
 	return &ArithIntDecoder{}
 }
 
-// Decode 解码
+// Decode 解码算术整数
 // 入参: decoder 算术解码器
-// 返回: int32 结果, bool 是否成功
+// 返回: int32 结果, bool 是否为有效数值，遇到OOB标志时返回0和false
 func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 	prev := 1
 	s := decoder.Decode(&aid.iax[prev])

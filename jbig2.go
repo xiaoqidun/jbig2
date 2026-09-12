@@ -35,6 +35,7 @@ type Decoder struct {
 }
 
 // NewDecoder 创建解码器
+// 创建时读取r的全部数据，不关闭r，页面在调用Decode或DecodeAll时解码
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
@@ -42,6 +43,9 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 }
 
 // NewDecoderWithGlobals 创建带全局段的解码器
+// 创建时读取r的全部数据并解析全局段，不关闭r
+// globals可为nil，非空时允许r提供不含文件头的段数据
+// 直接引用globals，不复制全局段数据
 // 入参: r 读取器, globals 全局段数据
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
@@ -177,6 +181,8 @@ func skipSWFHeader(data []byte) []byte {
 }
 
 // Decode 解码下一页
+// 黑白页面返回*image.Gray，彩色页面返回*image.NRGBA64
+// 页面耗尽时返回io.EOF，后续解码不会修改已返回的图像
 // 返回: image.Image 图像, error 错误信息
 func (d *Decoder) Decode() (image.Image, error) {
 	if d.doc == nil {
@@ -209,6 +215,7 @@ func (d *Decoder) Decode() (image.Image, error) {
 }
 
 // DecodeAll 解码所有剩余页面
+// 正常结束时错误为nil，解码失败时同时返回已完成的页面和错误
 // 返回: []image.Image 图像列表, error 错误信息
 func (d *Decoder) DecodeAll() ([]image.Image, error) {
 	var images []image.Image
@@ -226,12 +233,15 @@ func (d *Decoder) DecodeAll() ([]image.Image, error) {
 }
 
 // GetDocument 获取文档对象
+// 返回解码器使用的内部对象而非副本，其状态随解码推进而变化
 // 返回: *Document 文档对象
 func (d *Decoder) GetDocument() *Document {
 	return d.doc
 }
 
 // Decode 解码JBIG2数据包含的第一页
+// 黑白页面返回*image.Gray，彩色页面返回*image.NRGBA64，无页面时返回io.EOF
+// 读取r的全部数据，不关闭r
 // 入参: r 读取器
 // 返回: image.Image 图像, error 错误信息
 func Decode(r io.Reader) (image.Image, error) {
@@ -242,7 +252,9 @@ func Decode(r io.Reader) (image.Image, error) {
 	return dec.Decode()
 }
 
-// DecodeConfig 获取JBIG2图像配置
+// DecodeConfig 获取JBIG2首页配置
+// 黑白页面使用color.GrayModel，彩色页面使用color.NRGBA64Model
+// 页面头未指定高度时使用已解析的页面高度，读取r的全部数据且不关闭r
 // 入参: r 读取器
 // 返回: image.Config 图像配置, error 错误信息
 func DecodeConfig(r io.Reader) (image.Config, error) {
@@ -300,7 +312,8 @@ func init() {
 	image.RegisterFormat("jbig2", "\x97\x4A\x42\x32\x0D\x0A\x1A\x0A", Decode, DecodeConfig)
 }
 
-// ToGoImage 转换为Go标准库Image
+// ToGoImage 转换为Go标准库灰度图像
+// 返回独立的*image.Gray，位值0转换为白色，位值1转换为黑色，接收者为nil时返回nil
 // 返回: image.Image 图像
 func (i *Image) ToGoImage() image.Image {
 	if i == nil {

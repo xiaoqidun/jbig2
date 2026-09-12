@@ -19,20 +19,42 @@ import (
 	"image"
 )
 
-// ComposeData 混合数据
+// ComposeData 符号组合位置及坐标增量
 type ComposeData struct {
 	x, y      int32
 	increment int32
+}
+
+// X 获取符号左上角横坐标
+// 返回: int32 横坐标
+func (c ComposeData) X() int32 {
+	return c.x
+}
+
+// Y 获取符号左上角纵坐标
+// 返回: int32 纵坐标
+func (c ComposeData) Y() int32 {
+	return c.y
+}
+
+// Increment 获取符号组合后的S方向坐标增量
+// 返回: int32 坐标增量
+func (c ComposeData) Increment() int32 {
+	return c.increment
 }
 
 // JBig2Corner 角落位置枚举
 type JBig2Corner int
 
 const (
-	JBig2CornerBottomLeft  JBig2Corner = 0
-	JBig2CornerTopLeft     JBig2Corner = 1
+	// JBig2CornerBottomLeft 左下角
+	JBig2CornerBottomLeft JBig2Corner = 0
+	// JBig2CornerTopLeft 左上角
+	JBig2CornerTopLeft JBig2Corner = 1
+	// JBig2CornerBottomRight 右下角
 	JBig2CornerBottomRight JBig2Corner = 2
-	JBig2CornerTopRight    JBig2Corner = 3
+	// JBig2CornerTopRight 右上角
+	JBig2CornerTopRight JBig2Corner = 3
 )
 
 // TRDProc 文本区域解码过程
@@ -82,9 +104,10 @@ func NewTRDProc() *TRDProc {
 	}
 }
 
-// GetComposeData 获取混合位置数据
-// 入参: SI, TI 相对坐标, WI, HI 宽高
-// 返回: ComposeData 混合位置信息
+// GetComposeData 计算符号组合位置
+// 根据TRANSPOSED和REFCORNER将S、T坐标转换为符号左上角坐标及后续增量
+// 入参: SI S方向坐标, TI T方向坐标, WI 符号宽度, HI 符号高度
+// 返回: ComposeData 组合位置信息
 func (t *TRDProc) GetComposeData(SI, TI int32, WI, HI uint32) ComposeData {
 	var results ComposeData
 	if !t.TRANSPOSED {
@@ -286,7 +309,7 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 				}
 				SI := int32(CURS)
 				compose := t.GetComposeData(SI, TI, WI, HI)
-				IBI.ComposeTo(sbReg, int32(compose.x), int32(compose.y), t.SBCOMBOP)
+				IBI.ComposeTo(sbReg, compose.x, compose.y, t.SBCOMBOP)
 				if t.colorImage != nil {
 					if err := t.paintColorSymbol(IBI, compose.x, compose.y); err != nil {
 						return nil, err
@@ -301,6 +324,7 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 }
 
 // DecodeArith 算术解码
+// 复用ids中的非nil解码器，未提供的解码器在本次调用中创建
 // 入参: arithDecoder 算术解码器, grContexts 细化上下文集, ids 整数解码器状态
 // 返回: *Image 图像对象, error 错误信息
 func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState) (*Image, error) {
@@ -491,7 +515,7 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 				}
 				SI := int32(CURS)
 				compose := t.GetComposeData(SI, TI, WI, HI)
-				IBI.ComposeTo(sbReg, int32(compose.x), int32(compose.y), t.SBCOMBOP)
+				IBI.ComposeTo(sbReg, compose.x, compose.y, t.SBCOMBOP)
 				if t.colorImage != nil {
 					if err := t.paintColorSymbol(IBI, compose.x, compose.y); err != nil {
 						return nil, err

@@ -43,6 +43,7 @@ func NewGRDProc() *GRDProc {
 }
 
 // ProgressiveArithDecodeState 渐进式算术解码状态
+// Image接收解码图像，GbContexts按GetHuffContextSize分配并随解码更新
 type ProgressiveArithDecodeState struct {
 	Image        **Image
 	ArithDecoder *ArithDecoder
@@ -50,13 +51,14 @@ type ProgressiveArithDecodeState struct {
 }
 
 // StartDecodeArith 开始算术解码
+// 图像尺寸与GBW和GBH一致时清空复用，否则创建新图像
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
 		return JBig2SegmentError
 	}
-	created := *state.Image == nil
+	created := *state.Image == nil || (*state.Image).Width() != int32(g.GBW) || (*state.Image).Height() != int32(g.GBH)
 	if created {
 		*state.Image = NewImage(int32(g.GBW), int32(g.GBH))
 	}
@@ -86,7 +88,7 @@ func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentS
 	if err := DecodeG4(stream, *image); err != nil {
 		return JBig2SegmentError
 	}
-	g.replaceRect = Rect{0, 0, int32((*image).Width()), int32((*image).Height())}
+	g.replaceRect = Rect{0, 0, (*image).Width(), (*image).Height()}
 	return JBig2SegmentParseComplete
 }
 
@@ -101,6 +103,7 @@ func (g *GRDProc) ContinueDecode(state *ProgressiveArithDecodeState) JBig2Segmen
 }
 
 // DecodeArith 算术解码
+// contexts按GetHuffContextSize分配，解码过程中更新上下文
 // 入参: decoder 解码器, contexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (g *GRDProc) DecodeArith(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
@@ -117,6 +120,7 @@ func (g *GRDProc) DecodeArith(decoder *ArithDecoder, contexts []ArithCtx) (*Imag
 }
 
 // GetReplaceRect 获取替换区域
+// 返回本次解码更新的矩形，右边界和下边界不包含在区域内
 // 返回: Rect 区域
 func (g *GRDProc) GetReplaceRect() Rect {
 	return g.replaceRect
@@ -127,7 +131,7 @@ func (g *GRDProc) GetReplaceRect() Rect {
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) ProgressiveDecodeArith(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	img := *state.Image
-	g.replaceRect = Rect{0, int32(g.loopIndex), int32(img.Width()), int32(g.loopIndex)}
+	g.replaceRect = Rect{0, int32(g.loopIndex), img.Width(), int32(g.loopIndex)}
 	var res JBig2SegmentState
 	switch g.GBTEMPLATE {
 	case 0:

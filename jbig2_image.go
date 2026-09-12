@@ -14,7 +14,8 @@
 
 package jbig2
 
-// Image 图像结构体
+// Image 每像素1位的黑白图像
+// 按行存储，每字节从高位到低位排列，0表示白色，1表示黑色，行尾按字节补齐
 type Image struct {
 	width  int32
 	height int32
@@ -23,6 +24,7 @@ type Image struct {
 }
 
 // NewImage 创建新图像
+// 初始像素为白色，尺寸无效或超出支持范围时返回nil
 // 入参: width 宽度, height 高度
 // 返回: *Image 图像对象
 func NewImage(width, height int32) *Image {
@@ -76,13 +78,14 @@ func (i *Image) Height() int32 {
 	return i.height
 }
 
-// Stride 获取跨度
-// 返回: int32 跨度
+// Stride 获取每行占用的字节数
+// 返回: int32 行字节数
 func (i *Image) Stride() int32 {
 	return i.stride
 }
 
 // Data 获取数据
+// 返回内部切片而非副本，修改切片会改变图像，Expand可能更换底层数据
 // 返回: []byte 数据切片
 func (i *Image) Data() []byte {
 	return i.data
@@ -123,6 +126,7 @@ func setPixelInRow(row []byte, x int32) {
 }
 
 // GetPixel 获取像素值
+// 坐标越界时返回0
 // 入参: x 轴坐标, y 轴坐标
 // 返回: int 像素值
 func (i *Image) GetPixel(x, y int32) int {
@@ -135,6 +139,7 @@ func (i *Image) GetPixel(x, y int32) int {
 }
 
 // SetPixel 设置像素值
+// 非零值写为1，坐标越界时不修改图像
 // 入参: x 轴坐标, y 轴坐标, v 像素值
 func (i *Image) SetPixel(x, y int32, v int) {
 	if x < 0 || x >= i.width || y < 0 || y >= i.height {
@@ -328,6 +333,7 @@ func (i *Image) ComposeFrom(x, y int32, src *Image, op ComposeOp) {
 }
 
 // SubImage 获取子图像
+// 返回独立副本，超出源图像的区域填充白色，尺寸无效时返回nil
 // 入参: x 轴坐标, y 轴坐标, w 宽度, h 高度
 // 返回: *Image 子图像对象
 func (i *Image) SubImage(x, y, w, h int32) *Image {
@@ -372,6 +378,7 @@ func (i *Image) Expand(height int32, defaultPixel bool) {
 }
 
 // Duplicate 复制图像
+// 返回包含独立像素数据的副本，接收者为nil时返回nil
 // 返回: *Image 新图像
 func (i *Image) Duplicate() *Image {
 	if i == nil {

@@ -27,6 +27,7 @@ type TableLine struct {
 }
 
 // HuffmanTable 霍夫曼表
+// IsOK表示构建是否成功，修改表字段不会同步更新已生成的解码索引
 type HuffmanTable struct {
 	HTOOB    bool
 	NTEMP    uint32
@@ -47,7 +48,8 @@ type huffmanCodeIndex struct {
 }
 
 // NewStandardTable 从标准表创建霍夫曼表
-// 入参: idx 表索引
+// 索引无效时返回IsOK为false的表
+// 入参: idx 表索引，范围为1至15
 // 返回: *HuffmanTable 霍夫曼表
 func NewStandardTable(idx int) *HuffmanTable {
 	ht := &HuffmanTable{}
@@ -56,6 +58,7 @@ func NewStandardTable(idx int) *HuffmanTable {
 }
 
 // NewTableFromStream 从流创建霍夫曼表
+// 推进位流位置，解析失败时返回IsOK为false的表
 // 入参: stream 位流
 // 返回: *HuffmanTable 霍夫曼表
 func NewTableFromStream(stream *BitStream) *HuffmanTable {
@@ -213,8 +216,9 @@ func NewHuffmanDecoder(stream *BitStream) *HuffmanDecoder {
 }
 
 // DecodeAValue 解码一个数值
+// 成功时写入result，遇到OOB或解码失败时不修改result
 // 入参: table 霍夫曼表, result 结果指针
-// 返回: int 状态码
+// 返回: int 状态码，0表示成功，JBig2OOB表示越界符，-1表示解码失败
 func (h *HuffmanDecoder) DecodeAValue(table *HuffmanTable, result *int32) int {
 	if table.decoder == nil {
 		decoder, err := newHuffmanCodeIndex(table.CODES)
@@ -252,6 +256,7 @@ func (h *HuffmanDecoder) DecodeAValue(table *HuffmanTable, result *int32) int {
 }
 
 // HuffmanAssignCode 为霍夫曼表分配编码
+// 根据Codelen生成规范编码并写入原切片的Code字段，不改变条目顺序
 // 入参: symcodes 霍夫曼编码列表
 // 返回: error 错误信息
 func HuffmanAssignCode(symcodes []HuffmanCode) error {

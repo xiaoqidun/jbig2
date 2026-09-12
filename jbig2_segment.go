@@ -23,22 +23,33 @@ import (
 type JBig2SegmentState int
 
 const (
+	// JBig2SegmentHeaderUnparsed 段头尚未解析
 	JBig2SegmentHeaderUnparsed JBig2SegmentState = 0
-	JBig2SegmentDataUnparsed   JBig2SegmentState = 1
-	JBig2SegmentParseComplete  JBig2SegmentState = 2
-	JBig2SegmentPaused         JBig2SegmentState = 3
-	JBig2SegmentError          JBig2SegmentState = 4
+	// JBig2SegmentDataUnparsed 段数据尚未解析
+	JBig2SegmentDataUnparsed JBig2SegmentState = 1
+	// JBig2SegmentParseComplete 段解析完成
+	JBig2SegmentParseComplete JBig2SegmentState = 2
+	// JBig2SegmentPaused 段解析暂停
+	JBig2SegmentPaused JBig2SegmentState = 3
+	// JBig2SegmentError 段解析失败
+	JBig2SegmentError JBig2SegmentState = 4
 )
 
 // JBig2ResultType 段结果类型
 type JBig2ResultType int
 
 const (
-	JBig2VoidPointer         JBig2ResultType = 0
-	JBig2ImagePointer        JBig2ResultType = 1
-	JBig2SymbolDictPointer   JBig2ResultType = 2
-	JBig2PatternDictPointer  JBig2ResultType = 3
+	// JBig2VoidPointer 无解码结果
+	JBig2VoidPointer JBig2ResultType = 0
+	// JBig2ImagePointer 图像结果
+	JBig2ImagePointer JBig2ResultType = 1
+	// JBig2SymbolDictPointer 符号字典结果
+	JBig2SymbolDictPointer JBig2ResultType = 2
+	// JBig2PatternDictPointer 模式字典结果
+	JBig2PatternDictPointer JBig2ResultType = 3
+	// JBig2HuffmanTablePointer 霍夫曼表结果
 	JBig2HuffmanTablePointer JBig2ResultType = 4
+	// JBig2ColorPalettePointer 调色板结果
 	JBig2ColorPalettePointer JBig2ResultType = 5
 )
 

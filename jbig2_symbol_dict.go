@@ -48,6 +48,7 @@ func (s *SymbolDict) DeepCopy() *SymbolDict {
 }
 
 // AddImage 添加图像到字典
+// 保存图像引用，不复制像素数据
 // 入参: image 图像对象
 func (s *SymbolDict) AddImage(image *Image) {
 	s.Images = append(s.Images, image)
@@ -60,6 +61,7 @@ func (s *SymbolDict) NumImages() int {
 }
 
 // GetImage 从字典获取图像
+// 返回内部图像而非副本，索引无效时返回nil
 // 入参: index 索引
 // 返回: *Image 图像对象
 func (s *SymbolDict) GetImage(index int) *Image {
@@ -70,24 +72,28 @@ func (s *SymbolDict) GetImage(index int) *Image {
 }
 
 // GbContexts 获取算术编码通用上下文
+// 返回内部切片而非副本，修改切片会改变字典上下文
 // 返回: []ArithCtx 上下文集合
 func (s *SymbolDict) GbContexts() []ArithCtx {
 	return s.gbContexts
 }
 
 // GrContexts 获取算术编码细化上下文
+// 返回内部切片而非副本，修改切片会改变字典上下文
 // 返回: []ArithCtx 上下文集合
 func (s *SymbolDict) GrContexts() []ArithCtx {
 	return s.grContexts
 }
 
 // SetGbContexts 设置算术编码通用上下文
+// 保存切片引用，不复制上下文
 // 入参: contexts 上下文集合
 func (s *SymbolDict) SetGbContexts(contexts []ArithCtx) {
 	s.gbContexts = contexts
 }
 
 // SetGrContexts 设置算术编码细化上下文
+// 保存切片引用，不复制上下文
 // 入参: contexts 上下文集合
 func (s *SymbolDict) SetGrContexts(contexts []ArithCtx) {
 	s.grContexts = contexts

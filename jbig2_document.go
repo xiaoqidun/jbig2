@@ -57,18 +57,36 @@ type Document struct {
 }
 
 // GetSegments 获取段列表
+// 返回当前保留段的内部切片而非副本，后续解码或释放页面段会改变列表及段数据
 // 返回: []*Segment 段列表
 func (d *Document) GetSegments() []*Segment {
 	return d.segmentList
 }
 
 // GetGlobalContext 获取全局上下文
+// 返回内部对象而非副本，不含全局段时返回nil
 // 返回: *Document 全局上下文
 func (d *Document) GetGlobalContext() *Document {
 	return d.globalContext
 }
 
-// PageInfo 页面信息
+// GetPageInfo 获取已解析的页面信息
+// 按页面信息段的解析顺序查询，不推进解码，返回值为副本
+// 页面头未指定高度时保留0xFFFFFFFF，实际尺寸以解码图像为准
+// 入参: index 从0开始的页面索引，不是段中的页面编号
+// 返回: PageInfo 页面信息, bool 是否存在，索引无效或尚未解析时返回零值和false
+func (d *Document) GetPageInfo(index int) (PageInfo, bool) {
+	if index < 0 || index >= len(d.pageInfoList) {
+		return PageInfo{}, false
+	}
+	return *d.pageInfoList[index], true
+}
+
+// PageInfo 页面信息段中的元数据
+// Width和Height以像素为单位，Height为0xFFFFFFFF表示页面头未指定高度
+// ResolutionX和ResolutionY保留页面头中的分辨率原始值
+// DefaultPixelValue为黑白位图的默认像素值，true表示黑色
+// IsStriped表示是否分条带，MaxStripeSize为页面头声明的最大条带高度
 type PageInfo struct {
 	Width             uint32
 	Height            uint32
@@ -80,7 +98,9 @@ type PageInfo struct {
 }
 
 // NewDocument 创建文档对象
-// 入参: data 数据流, globalData 全局数据, randomAccess 随机访问, littleEndian 小端序
+// data为不含文件头的段数据，不进行格式探测或自动解析全局段，完整文件使用NewDecoder
+// 直接引用data和globalData，不复制段数据
+// 入参: data 数据流, globalData 全局数据, randomAccess 是否允许前向段引用, littleEndian 小端序
 // 返回: *Document 文档对象
 func NewDocument(data []byte, globalData []byte, randomAccess bool, littleEndian bool) *Document {
 	stream := NewBitStream(data, 0)
@@ -204,6 +224,7 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 }
 
 // FindSegmentByNumber 查找段
+// 优先查询全局段，返回内部对象而非副本，未找到时返回nil
 // 入参: number 段编号
 // 返回: *Segment 段对象
 func (d *Document) FindSegmentByNumber(number uint32) *Segment {
@@ -665,14 +686,16 @@ func (d *Document) expandPageForRegion(ri *RegionInfo) {
 	d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
 }
 
-// GetHuffmanTable 获取霍夫曼表
-// 入参: idx 索引
+// GetHuffmanTable 创建标准霍夫曼表
+// 与NewStandardTable相同，不查询文档中的自定义表
+// 入参: idx 标准表索引，范围为1至15
 // 返回: *HuffmanTable 霍夫曼表
 func (d *Document) GetHuffmanTable(idx int) *HuffmanTable {
 	return NewStandardTable(idx)
 }
 
 // DecodeSymbolIDHuffmanTable 解码符号ID霍夫曼表
+// 推进文档位流，解码失败时返回nil
 // 入参: SBNUMSYMS 符号数
 // 返回: []HuffmanCode 霍夫曼编码切片
 func (d *Document) DecodeSymbolIDHuffmanTable(SBNUMSYMS uint32) []HuffmanCode {
@@ -1326,9 +1349,10 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	return ResultSuccess
 }
 
-// GetHuffContextSize 获取上下文大小
-// 入参: template 模板号
-// 返回: int 大小
+// GetHuffContextSize 获取通用区域算术解码上下文数量
+// 模板0返回65536，模板1返回8192，模板2和3返回1024
+// 入参: template 模板号，范围为0至3
+// 返回: int 上下文数量
 func GetHuffContextSize(template byte) int {
 	if template == 0 {
 		return 65536
@@ -1532,6 +1556,7 @@ func (d *Document) parseTable(segment *Segment) Result {
 }
 
 // ReleasePageSegments 释放页面段数据
+// 移除指定页面的段并清空段中的解码结果，已取得的段引用也会受影响
 // 入参: pageNumber 页面编号
 func (d *Document) ReleasePageSegments(pageNumber uint32) {
 	n := 0

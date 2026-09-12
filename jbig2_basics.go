@@ -66,6 +66,7 @@ type HuffmanCode struct {
 }
 
 // Rect 矩形
+// Left和Top包含在区域内，Right和Bottom不包含在区域内
 type Rect struct {
 	Left   int32
 	Top    int32

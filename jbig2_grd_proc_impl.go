@@ -31,9 +31,6 @@ var (
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2SegmentState {
-	if state.Image == nil || *state.Image == nil {
-		return JBig2SegmentError
-	}
 	img := *state.Image
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
@@ -192,9 +189,6 @@ func (g *GRDProc) decodeTemplate23Opt3(state *ProgressiveArithDecodeState, opt i
 // 入参: state 解码状态, opt 模板选项
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int) JBig2SegmentState {
-	if state.Image == nil || *state.Image == nil {
-		return JBig2SegmentError
-	}
 	img := *state.Image
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
@@ -273,9 +267,6 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2SegmentState {
-	if state.Image == nil || *state.Image == nil {
-		return JBig2SegmentError
-	}
 	img := *state.Image
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
@@ -319,9 +310,6 @@ func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2Se
 // 入参: state 解码状态, opt 选项
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplateUnopt(state *ProgressiveArithDecodeState, opt int) JBig2SegmentState {
-	if state.Image == nil || *state.Image == nil {
-		return JBig2SegmentError
-	}
 	img := *state.Image
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
@@ -392,9 +380,6 @@ func (g *GRDProc) decodeTemplateUnopt(state *ProgressiveArithDecodeState, opt in
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate3Unopt(state *ProgressiveArithDecodeState) JBig2SegmentState {
-	if state.Image == nil || *state.Image == nil {
-		return JBig2SegmentError
-	}
 	img := *state.Image
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
