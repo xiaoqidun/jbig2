@@ -144,7 +144,42 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 			interiorStart = 0
 			interiorEnd = 0
 		}
-		for w := int32(0); w < width; w++ {
+		for w := int32(0); w < width; {
+			if w&7 == 0 && w >= interiorStart && w+8 < interiorEnd {
+				index := w >> 3
+				previousWindow := uint32(previousRow[index])<<8 | uint32(previousRow[index+1])
+				referenceNext := referenceX + w + 2
+				referenceIndex := referenceNext >> 3
+				referenceWindow := uint64(refPreviousRow[referenceIndex])<<40 | uint64(refPreviousRow[referenceIndex+1])<<32 |
+					uint64(refRow[referenceIndex])<<24 | uint64(refRow[referenceIndex+1])<<16 |
+					uint64(refNextRow[referenceIndex])<<8 | uint64(refNextRow[referenceIndex+1])
+				referenceWindow <<= uint(referenceNext & 7)
+				output := &row[index]
+				for shift := uint(8); shift > 0; shift-- {
+					bVal := 0
+					needDecode := ltp == 0
+					if ltp != 0 {
+						pixels := context & 0x01ff
+						bVal = int((context >> 4) & 1)
+						needDecode = pixels != 0 && pixels != 0x01ff
+					}
+					if needDecode {
+						if decoder.IsComplete() {
+							return nil, errors.New("decoder complete prematurely")
+						}
+						bVal = decoder.Decode(&contexts[context])
+					}
+					if bVal != 0 {
+						*output |= 1 << (shift - 1)
+					}
+					context = ((context << 1) & 0x19b6) | (previousWindow>>3)&0x0400 | uint32(bVal)<<9 |
+						uint32((referenceWindow>>41)&0x40) | uint32((referenceWindow>>28)&0x08) | uint32((referenceWindow>>15)&1)
+					previousWindow <<= 1
+					referenceWindow <<= 1
+				}
+				w += 8
+				continue
+			}
 			bVal := 0
 			needDecode := ltp == 0
 			if ltp != 0 {
@@ -176,6 +211,7 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 			}
 			context = ((context << 1) & 0x19b6) | previousNext<<10 | uint32(bVal)<<9 |
 				refPreviousNext<<6 | refNext<<3 | refNextNext
+			w++
 		}
 	}
 	return grReg, nil
