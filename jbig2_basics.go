@@ -22,9 +22,9 @@ const (
 	// JBig2MaxReferredSegmentCount 最大参考段数
 	JBig2MaxReferredSegmentCount = 64
 	// JBig2MaxExportSymbols 最大导出符号数
-	JBig2MaxExportSymbols = 65535
+	JBig2MaxExportSymbols = 1 << 18
 	// JBig2MaxNewSymbols 最大新符号数
-	JBig2MaxNewSymbols = 65535
+	JBig2MaxNewSymbols = 1 << 18
 	// JBig2MaxPatternIndex 最大模式索引
 	JBig2MaxPatternIndex = 65535
 	// JBig2MaxImageSize 最大图像尺寸

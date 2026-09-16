@@ -306,7 +306,12 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 			if SYMWIDTH > JBig2MaxImageSize {
 				return nil, errors.New("image width too large")
 			}
-			TOTWIDTH += SYMWIDTH
+			if !s.SDREFAGG {
+				if TOTWIDTH > 2147483647-SYMWIDTH {
+					return nil, errors.New("total width too large")
+				}
+				TOTWIDTH += SYMWIDTH
+			}
 			if HCHEIGHT == 0 || SYMWIDTH == 0 {
 				NSYMSDECODED++
 				continue
@@ -430,10 +435,6 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				copy(BHC.Data(), stream.GetPointer()[:dataSize])
 				stream.AddOffset(dataSize)
 			} else {
-				pGRD := NewGRDProc()
-				pGRD.MMR = true
-				pGRD.GBW = TOTWIDTH
-				pGRD.GBH = HCHEIGHT
 				if stream.GetByteLeft() < uint32(BMSIZE) {
 					return nil, errors.New("insufficient data for mmr")
 				}
@@ -441,7 +442,19 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				mmrStart := stream.GetOffset()
 				stream.AddOffset(uint32(BMSIZE))
 				mmrStream := NewBitStream(mmrData, 0)
-				if pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError || BHC == nil {
+				var mmrFailed bool
+				if TOTWIDTH > JBig2MaxImageSize {
+					var err error
+					BHC, err = NewMMRDecompressor(int(TOTWIDTH), int(HCHEIGHT), mmrStream).Uncompress()
+					mmrFailed = err != nil
+				} else {
+					pGRD := NewGRDProc()
+					pGRD.MMR = true
+					pGRD.GBW = TOTWIDTH
+					pGRD.GBH = HCHEIGHT
+					mmrFailed = pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError
+				}
+				if mmrFailed || BHC == nil {
 					if BMSIZE != 1 {
 						return nil, errors.New("mmr decoding failure")
 					}

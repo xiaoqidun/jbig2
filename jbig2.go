@@ -201,11 +201,10 @@ func skipSWFHeader(data []byte) []byte {
 				return data[payloadOffset:]
 			}
 		}
-		nextOffset := headerLen + tagLen
-		if len(data) < nextOffset {
+		if tagLen < 0 || tagLen > len(data)-headerLen {
 			break
 		}
-		data = data[nextOffset:]
+		data = data[headerLen+tagLen:]
 	}
 	return data
 }
