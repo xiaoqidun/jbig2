@@ -14,6 +14,11 @@
 
 package jbig2
 
+import (
+	"image"
+	"image/color"
+)
+
 // Image 每像素1位的黑白图像
 // 按行存储，每字节从高位到低位排列，0表示白色，1表示黑色，行尾按字节补齐
 type Image struct {
@@ -21,6 +26,33 @@ type Image struct {
 	height int32
 	stride int32
 	data   []byte
+}
+
+// ColorModel 获取标准库颜色模型
+// 返回: color.Model 灰度颜色模型
+func (i *Image) ColorModel() color.Model {
+	return color.GrayModel
+}
+
+// Bounds 获取标准库图像边界
+// 图像原点为0，接收者为nil时返回空边界
+// 返回: image.Rectangle 图像边界
+func (i *Image) Bounds() image.Rectangle {
+	if i == nil {
+		return image.Rectangle{}
+	}
+	return image.Rect(0, 0, int(i.width), int(i.height))
+}
+
+// At 获取标准库像素颜色
+// 位值0为白色，位值1为黑色，坐标越界或接收者为nil时返回零值灰度颜色
+// 入参: x 横坐标, y 纵坐标
+// 返回: color.Color 像素颜色
+func (i *Image) At(x, y int) color.Color {
+	if i == nil || x < 0 || y < 0 || x >= int(i.width) || y >= int(i.height) {
+		return color.Gray{}
+	}
+	return color.Gray{Y: byte(255 * (1 - i.GetPixel(int32(x), int32(y))))}
 }
 
 // NewImage 创建新图像

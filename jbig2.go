@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package jbig2 一个高性能、零依赖的纯 Go 语言 JBIG2 解码器
+// Package jbig2 高性能、纯 Go 语言实现的 JBIG2 图像编解码库
 package jbig2
 
 import (
@@ -39,28 +39,35 @@ type Decoder struct {
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	return NewDecoderWithGlobals(r, nil)
+	return newDecoder(r, nil, false)
 }
 
 // NewDecoderWithGlobals 创建带全局段的解码器
 // 创建时读取r的全部数据并解析全局段，不关闭r
-// globals可为nil，非空时允许r提供不含文件头的段数据
+// r可提供完整文件或不含文件头的嵌入段数据，不需要全局段时globals可为nil
 // 直接引用globals，不复制全局段数据
 // 入参: r 读取器, globals 全局段数据
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
+	return newDecoder(r, globals, true)
+}
+
+// newDecoder 创建解码器并按需识别嵌入数据
+// 入参: r 读取器, globals 全局段数据, embedded 是否允许嵌入数据
+// 返回: *Decoder 解码器, error 错误信息
+func newDecoder(r io.Reader, globals []byte, embedded bool) (*Decoder, error) {
 	data, err := readDecoderData(r)
 	if err != nil {
 		return nil, err
 	}
 	probedData, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
 	if probedData == nil {
-		if len(globals) > 0 {
+		if embedded && (len(globals) > 0 || validEmbeddedHeader(data)) {
 			randomAccess = false
 			littleEndian = false
 			orgMode = 0
 			grouped = false
-			if len(data) >= 4 {
+			if len(globals) > 0 && len(data) >= 4 {
 				if data[0] != 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 {
 					littleEndian = true
 				}
@@ -78,6 +85,29 @@ func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
 		return nil, err
 	}
 	return &Decoder{doc: doc, pageIndex: 0}, nil
+}
+
+// validEmbeddedHeader 检查无全局段嵌入数据的首个大端段头
+// 入参: data 嵌入数据
+// 返回: bool 是否具有有效段头
+func validEmbeddedHeader(data []byte) bool {
+	if len(data) < 11 || bytes.HasPrefix(data, jbig2Signature) || data[5]>>5 == 5 || data[5]>>5 == 6 {
+		return false
+	}
+	doc := NewDocument(data, nil, false, false)
+	var segment Segment
+	if doc.ParseSegmentHeader(&segment) != ResultSuccess || segment.Number == ^uint32(0) {
+		return false
+	}
+	switch segment.Flags.Type {
+	case 0, 4, 6, 7, 16, 20, 22, 23, 36, 38, 39, 40, 42, 43, 48, 49, 50, 51, 52, 53, 54, 62:
+	default:
+		return false
+	}
+	if segment.DataLength == ^uint32(0) {
+		return segment.Flags.Type == 38 || segment.Flags.Type == 39
+	}
+	return segment.DataLength <= doc.stream.GetByteLeft()
 }
 
 // parseGlobalSegments 解析全局段

@@ -1,5 +1,5 @@
 # JBIG2 [![PkgGoDev](https://pkg.go.dev/badge/github.com/xiaoqidun/jbig2)](https://pkg.go.dev/github.com/xiaoqidun/jbig2)
-一个高性能、零依赖的纯 Go 语言 JBIG2 解码器
+高性能、纯 Go 语言实现的 JBIG2 图像编解码库
 
 # 安装指南
 ```shell
@@ -125,6 +125,94 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("格式: %s, 宽度: %d, 高度: %d, 已输出到 test.png\n", format, img.Bounds().Dx(), img.Bounds().Dy())
+}
+```
+
+# 编码全部
+```go
+package main
+
+import (
+	"image"
+	"image/png"
+	"log"
+	"os"
+
+	"github.com/xiaoqidun/jbig2"
+)
+
+func main() {
+	fileNames := []string{"test_0.png", "test_1.png"}
+	var images []image.Image
+	for _, name := range fileNames {
+		file, err := os.Open(name)
+		if err != nil {
+			log.Fatal(err)
+		}
+		img, err := png.Decode(file)
+		file.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+		bitmap, err := jbig2.Binarize(img, 128)
+		if err != nil {
+			log.Fatal(err)
+		}
+		images = append(images, bitmap)
+	}
+	outFile, err := os.Create("test.jb2")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := jbig2.EncodeAll(outFile, images, nil); err != nil {
+		outFile.Close()
+		log.Fatal(err)
+	}
+	if err := outFile.Close(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("已编码 %d 页到 test.jb2\n", len(images))
+}
+```
+
+# 编码单页
+```go
+package main
+
+import (
+	"image/png"
+	"log"
+	"os"
+
+	"github.com/xiaoqidun/jbig2"
+)
+
+func main() {
+	file, err := os.Open("test.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	img, err := png.Decode(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bitmap, err := jbig2.Binarize(img, 128)
+	if err != nil {
+		log.Fatal(err)
+	}
+	outFile, err := os.Create("test.jb2")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := jbig2.Encode(outFile, bitmap, nil); err != nil {
+		outFile.Close()
+		log.Fatal(err)
+	}
+	if err := outFile.Close(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("宽度: %d, 高度: %d, 已输出到 test.jb2\n", bitmap.Bounds().Dx(), bitmap.Bounds().Dy())
 }
 ```
 
