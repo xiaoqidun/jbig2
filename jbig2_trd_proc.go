@@ -43,7 +43,7 @@ func (c ComposeData) Increment() int32 {
 	return c.increment
 }
 
-// JBig2Corner 角落位置枚举
+// JBig2Corner 文本符号定位时使用的参考角
 type JBig2Corner int
 
 const (
@@ -57,7 +57,7 @@ const (
 	JBig2CornerTopRight JBig2Corner = 3
 )
 
-// TRDProc 文本区域解码过程
+// TRDProc 文本区域的解码参数与状态
 type TRDProc struct {
 	colorImage         *image.NRGBA64
 	colorRuns          []colorRun
@@ -96,8 +96,8 @@ type IntDecoderState struct {
 	IAID                         *ArithIaidDecoder
 }
 
-// NewTRDProc 创建文本区域解码过程对象
-// 返回: *TRDProc 对象
+// NewTRDProc 创建文本区域解码器
+// 返回: *TRDProc 文本区域解码器
 func NewTRDProc() *TRDProc {
 	return &TRDProc{
 		SBSTRIPS: 1,
@@ -135,9 +135,9 @@ func (t *TRDProc) GetComposeData(SI, TI int32, WI, HI uint32) ComposeData {
 	return results
 }
 
-// checkTRDDimension 检查文本区域维度
-// 入参: dimension 原始维度, delta 增量
-// 返回: uint32 新维度, bool 是否有效
+// checkTRDDimension 计算调整后的符号尺寸并检查溢出
+// 入参: dimension 原始尺寸, delta 尺寸增量
+// 返回: uint32 调整后尺寸, bool 是否在有效范围内
 func checkTRDDimension(dimension uint32, delta int32) (uint32, bool) {
 	res := int64(dimension) + int64(delta)
 	if res < 0 || res > 0xFFFFFFFF {
@@ -146,9 +146,9 @@ func checkTRDDimension(dimension uint32, delta int32) (uint32, bool) {
 	return uint32(res), true
 }
 
-// checkTRDReferenceDimension 检查参考维度
-// 入参: dimension 维度, shift 位移, offset 偏移
-// 返回: int32 新坐标, bool 是否有效
+// checkTRDReferenceDimension 计算细化参考图像的坐标偏移并检查溢出
+// 入参: dimension 尺寸差值, shift 右移位数, offset 基础偏移
+// 返回: int32 坐标偏移, bool 是否在有效范围内
 func checkTRDReferenceDimension(dimension int32, shift uint32, offset int32) (int32, bool) {
 	res := int64(offset) + (int64(dimension) >> shift)
 	if res < -2147483648 || res > 2147483647 {
@@ -157,16 +157,16 @@ func checkTRDReferenceDimension(dimension int32, shift uint32, offset int32) (in
 	return int32(res), true
 }
 
-// DecodeHuffman 霍夫曼解码
-// 入参: stream 位流, grContexts 细化上下文集
-// 返回: *Image 图像对象, error 错误信息
+// DecodeHuffman 使用霍夫曼编码解码文本区域
+// 入参: stream 位流, grContexts 细化上下文
+// 返回: *Image 图像, error 错误信息
 func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Image, error) {
 	return t.decodeHuffmanInto(stream, grContexts, nil)
 }
 
-// decodeHuffmanInto 霍夫曼解码到指定图像
-// 入参: stream 位流, grContexts 细化上下文集, sbReg 指定图像
-// 返回: *Image 图像对象, error 错误信息
+// decodeHuffmanInto 使用霍夫曼编码将文本区域解码到指定图像
+// 入参: stream 位流, grContexts 细化上下文, sbReg 指定图像
+// 返回: *Image 图像, error 错误信息
 func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sbReg *Image) (*Image, error) {
 	if sbReg == nil {
 		sbReg = NewImage(int32(t.SBW), int32(t.SBH))
@@ -323,17 +323,17 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 	return sbReg, nil
 }
 
-// DecodeArith 算术解码
+// DecodeArith 使用算术编码解码文本区域
 // 复用ids中的非nil解码器，未提供的解码器在本次调用中创建
-// 入参: arithDecoder 算术解码器, grContexts 细化上下文集, ids 整数解码器状态
-// 返回: *Image 图像对象, error 错误信息
+// 入参: arithDecoder 算术解码器, grContexts 细化上下文, ids 整数解码器状态
+// 返回: *Image 图像, error 错误信息
 func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState) (*Image, error) {
 	return t.decodeArithInto(arithDecoder, grContexts, ids, nil)
 }
 
-// decodeArithInto 算术解码到指定图像
-// 入参: arithDecoder 算术解码器, grContexts 细化上下文集, ids 整数解码器状态, sbReg 指定图像
-// 返回: *Image 图像对象, error 错误信息
+// decodeArithInto 使用算术编码将文本区域解码到指定图像
+// 入参: arithDecoder 算术解码器, grContexts 细化上下文, ids 整数解码器状态, sbReg 指定图像
+// 返回: *Image 图像, error 错误信息
 func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState, sbReg *Image) (*Image, error) {
 	var pIADT, pIAFS, pIADS, pIAIT, pIARI, pIARDW, pIARDH, pIARDX, pIARDY *ArithIntDecoder
 	var pIAID *ArithIaidDecoder

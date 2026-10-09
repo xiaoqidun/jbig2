@@ -20,6 +20,7 @@ import (
 	"reflect"
 )
 
+// 编码时每页的默认像素数和输出字节数上限
 const (
 	defaultEncodeMaxPixels    = 64 << 20
 	defaultEncodeMaxPageBytes = 128 << 20

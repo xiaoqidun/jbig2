@@ -138,7 +138,7 @@ func readDecoderData(r io.Reader) ([]byte, error) {
 	return normalizeDecoderData(data)
 }
 
-// normalizeDecoderData 规范化解码数据
+// normalizeDecoderData 解压CWS封装并定位其中的JBIG2数据，其他输入保持不变
 // 入参: data 数据
 // 返回: []byte 数据, error 错误信息
 func normalizeDecoderData(data []byte) ([]byte, error) {
@@ -161,7 +161,7 @@ func normalizeDecoderData(data []byte) ([]byte, error) {
 	return data, nil
 }
 
-// skipSWFHeader 跳过SWF头和标签
+// skipSWFHeader 跳过SWF帧头及无关标签，定位图像标签中的数据
 // 入参: data 数据
 // 返回: []byte 数据
 func skipSWFHeader(data []byte) []byte {
@@ -319,7 +319,7 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	return image.Config{}, errors.New("page information not found")
 }
 
-// probeConfigs 探测JBIG2文件的配置
+// probeConfigs 识别JBIG2文件头并取得段数据及组织方式
 // 入参: data 数据
 // 返回: probed 探测后的数据, randomAccess 是否随机访问, littleEndian 是否小端序, orgMode 组织模式, grouped 是否分组
 func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian bool, orgMode int, grouped bool) {
@@ -337,6 +337,7 @@ func probeConfigs(data []byte) (probed []byte, randomAccess bool, littleEndian b
 	return data[offset:], randomAccess, false, 0, randomAccess
 }
 
+// init 向image包注册JBIG2解码器
 func init() {
 	image.RegisterFormat("jbig2", "\x97\x4A\x42\x32\x0D\x0A\x1A\x0A", Decode, DecodeConfig)
 }
@@ -375,7 +376,7 @@ func (i *Image) ToGoImage() image.Image {
 	return img
 }
 
-// grayByteTable 灰度像素展开表
+// grayByteTable 将每个打包字节展开为8个灰度像素的查找表
 var grayByteTable = func() (table [256]uint64) {
 	for value := range table {
 		pixels := uint64(value)
@@ -387,7 +388,7 @@ var grayByteTable = func() (table [256]uint64) {
 	return
 }()
 
-// expandGrayByte 将一个打包字节扩展为8个灰度像素
+// expandGrayByte 将一个打包字节展开为8个灰度像素
 // 入参: value 打包像素
 // 返回: uint64 灰度像素
 func expandGrayByte(value byte) uint64 {

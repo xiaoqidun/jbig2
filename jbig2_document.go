@@ -19,7 +19,7 @@ import (
 	"image/color"
 )
 
-// Result 解析结果
+// Result 段解析的状态，包括成功、失败、继续解码及页面或数据结束
 type Result int
 
 const (
@@ -120,8 +120,8 @@ func NewDocument(data []byte, globalData []byte, randomAccess bool, littleEndian
 }
 
 // ParseSegmentHeader 解析段头
-// 入参: segment 段对象
-// 返回: Result 结果
+// 入参: segment 段
+// 返回: Result 解析状态
 func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 	if val, err := d.stream.ReadInteger(); err != nil {
 		return ResultFailure
@@ -223,10 +223,10 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 	return ResultSuccess
 }
 
-// FindSegmentByNumber 查找段
+// FindSegmentByNumber 按编号查找段
 // 优先查询全局段，返回内部对象而非副本，未找到时返回nil
 // 入参: number 段编号
-// 返回: *Segment 段对象
+// 返回: *Segment 段
 func (d *Document) FindSegmentByNumber(number uint32) *Segment {
 	if d.globalContext != nil {
 		if seg := d.globalContext.FindSegmentByNumber(number); seg != nil {
@@ -242,8 +242,8 @@ func (d *Document) FindSegmentByNumber(number uint32) *Segment {
 }
 
 // ParseSegmentData 解析段数据
-// 入参: segment 段对象
-// 返回: Result 结果
+// 入参: segment 段
+// 返回: Result 解析状态
 func (d *Document) ParseSegmentData(segment *Segment) Result {
 	if segment.DataLength != 0xFFFFFFFF && segment.DataLength > d.stream.GetByteLeft() {
 		return ResultFailure
@@ -301,8 +301,8 @@ func (d *Document) ParseSegmentData(segment *Segment) Result {
 	return ResultSuccess
 }
 
-// DecodeSequential 顺序解码
-// 返回: Result 结果
+// DecodeSequential 按顺序解析段，直到当前页完成或遇到错误
+// 返回: Result 解析状态
 func (d *Document) DecodeSequential() Result {
 	if d.stream.GetByteLeft() <= 0 {
 		return ResultEndReached
@@ -341,8 +341,8 @@ func (d *Document) DecodeSequential() Result {
 	return ResultSuccess
 }
 
-// decodeGrouped 分组解码
-// 返回: Result 结果
+// decodeGrouped 先解析段头，再按段偏移解码当前页数据
+// 返回: Result 解析状态
 func (d *Document) decodeGrouped() Result {
 	if !d.groupedParsed {
 		for d.stream.GetByteLeft() > 0 {
@@ -390,7 +390,7 @@ func (d *Document) decodeGrouped() Result {
 }
 
 // parseSymbolDict 解析符号字典段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseSymbolDict(segment *Segment) Result {
 	refNumbers := segment.ReferredToSegmentNumbers
@@ -586,7 +586,7 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	return ResultSuccess
 }
 
-// findImplicitSymbolDict 查找同页省略引用的符号字典
+// findImplicitSymbolDict 查找同页可隐式引用的符号字典
 // 入参: page 页号
 // 返回: *Segment 符号字典段
 func (d *Document) findImplicitSymbolDict(page uint32) *Segment {
@@ -604,7 +604,7 @@ func (d *Document) findImplicitSymbolDict(page uint32) *Segment {
 
 // ParseRegionInfo 解析区域信息
 // 入参: ri 区域信息
-// 返回: Result 结果
+// 返回: Result 解析状态
 func (d *Document) ParseRegionInfo(ri *RegionInfo) Result {
 	if val, err := d.stream.ReadInteger(); err != nil {
 		return ResultFailure
@@ -648,7 +648,7 @@ func composeOpFromRegionFlags(flags uint8) ComposeOp {
 }
 
 // canDecodeTextRegionIntoPage 检查文本区域是否可直接解码到页面
-// 入参: segment 段对象, ri 区域信息, trd 文本区域解码过程
+// 入参: segment 段, ri 区域信息, trd 文本区域解码器
 // 返回: bool 是否可直接解码
 func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo, trd *TRDProc) bool {
 	if d.colorPage != nil || d.pageWritten || segment.Flags.Type == 4 || d.page == nil || len(d.pageInfoList) == 0 {
@@ -776,7 +776,7 @@ func (d *Document) decodeSymbolIDHuffmanTable(SBNUMSYMS uint32, includeRunCode b
 }
 
 // parseTextRegion 解析文本区域段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseTextRegion(segment *Segment) Result {
 	start := *d.stream
@@ -790,7 +790,7 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 }
 
 // parseTextRegionData 解析文本区域数据
-// 入参: segment 段对象, includeRunCode 是否保留游程前缀
+// 入参: segment 段, includeRunCode 是否保留游程前缀
 // 返回: Result 解析结果
 func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Result {
 	refNumbers := segment.ReferredToSegmentNumbers
@@ -1080,7 +1080,7 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 }
 
 // parsePatternDict 解析模式字典段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parsePatternDict(segment *Segment) Result {
 	var flags byte
@@ -1138,7 +1138,7 @@ func (d *Document) parsePatternDict(segment *Segment) Result {
 }
 
 // parseHalftoneRegion 解析半色调区域段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 	var ri RegionInfo
@@ -1241,7 +1241,7 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 }
 
 // parseGenericRegion 解析通用区域段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseGenericRegion(segment *Segment) Result {
 	var ri RegionInfo
@@ -1363,7 +1363,7 @@ func GetHuffContextSize(template byte) int {
 }
 
 // parseGenericRefinementRegion 解析通用细化区域段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	var ri RegionInfo
@@ -1440,7 +1440,7 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 }
 
 // parsePageInfo 解析页面信息段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parsePageInfo(segment *Segment) Result {
 	pi := &PageInfo{}
@@ -1541,8 +1541,8 @@ func (d *Document) parseEndOfStripe() Result {
 	return ResultSuccess
 }
 
-// parseTable 解析表段
-// 入参: segment 段对象
+// parseTable 解析自定义霍夫曼表段
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseTable(segment *Segment) Result {
 	segment.ResultType = JBig2HuffmanTablePointer

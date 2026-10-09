@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-// PDDProc 模式字典解码过程
+// PDDProc 模式字典的解码参数
 type PDDProc struct {
 	HDMMR      bool
 	HDPW, HDPH uint8
@@ -26,14 +26,14 @@ type PDDProc struct {
 	HDTEMPLATE uint8
 }
 
-// NewPDDProc 创建模式字典解码过程对象
-// 返回: *PDDProc 对象
+// NewPDDProc 创建模式字典解码器
+// 返回: *PDDProc 模式字典解码器
 func NewPDDProc() *PDDProc {
 	return &PDDProc{}
 }
 
-// createGRDProc 创建通用区域解码过程对象
-// 返回: *GRDProc 对象
+// createGRDProc 创建通用区域解码器
+// 返回: *GRDProc 通用区域解码器
 func (p *PDDProc) createGRDProc() *GRDProc {
 	width := (p.GRAYMAX + 1) * uint32(p.HDPW)
 	height := uint32(p.HDPH)
@@ -47,9 +47,9 @@ func (p *PDDProc) createGRDProc() *GRDProc {
 	return grd
 }
 
-// DecodeArith 算术解码
-// 入参: arithDecoder 算术解码器, gbContexts 上下文集
-// 返回: *PatternDict 模式字典对象, error 错误信息
+// DecodeArith 使用算术编码解码模式字典
+// 入参: arithDecoder 算术解码器, gbContexts 上下文
+// 返回: *PatternDict 模式字典, error 错误信息
 func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx) (*PatternDict, error) {
 	grd := p.createGRDProc()
 	if grd == nil {
@@ -82,8 +82,8 @@ func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx)
 }
 
 // createPatternDict 构建模式字典
-// 入参: bhdc 集合位图
-// 返回: *PatternDict 模式字典对象
+// 入参: bhdc 横向拼接全部模式的位图
+// 返回: *PatternDict 模式字典
 func (p *PDDProc) createPatternDict(bhdc *Image) *PatternDict {
 	dict := NewPatternDict(p.GRAYMAX + 1)
 	hdpw := int32(p.HDPW)
@@ -95,9 +95,9 @@ func (p *PDDProc) createPatternDict(bhdc *Image) *PatternDict {
 	return dict
 }
 
-// DecodeMMR MMR解码
+// DecodeMMR 使用MMR解码模式字典
 // 入参: stream 位流
-// 返回: *PatternDict 模式字典对象, error 错误信息
+// 返回: *PatternDict 模式字典, error 错误信息
 func (p *PDDProc) DecodeMMR(stream *BitStream) (*PatternDict, error) {
 	grd := p.createGRDProc()
 	if grd == nil {

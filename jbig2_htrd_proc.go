@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-// HTRDProc 半色调区域解码过程
+// HTRDProc 半色调区域的解码参数与状态
 type HTRDProc struct {
 	HBW, HBH    uint32
 	HMMR        bool
@@ -34,13 +34,13 @@ type HTRDProc struct {
 	HPW, HPH    uint8
 }
 
-// NewHTRDProc 创建半色调区域解码过程对象
-// 返回: *HTRDProc 对象
+// NewHTRDProc 创建半色调区域解码器
+// 返回: *HTRDProc 半色调区域解码器
 func NewHTRDProc() *HTRDProc {
 	return &HTRDProc{}
 }
 
-// DecodeArith 算术解码
+// DecodeArith 使用算术编码解码半色调区域
 // 入参: arithDecoder 算术解码器, gbContexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx) (*Image, error) {
@@ -111,7 +111,7 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 	return h.decodeImage(gsplanes)
 }
 
-// DecodeMMR MMR解码
+// DecodeMMR 使用MMR解码半色调区域
 // 入参: stream 位流
 // 返回: *Image 半色调区域图像, error 错误信息
 func (h *HTRDProc) DecodeMMR(stream *BitStream) (*Image, error) {
@@ -141,8 +141,8 @@ func (h *HTRDProc) DecodeMMR(stream *BitStream) (*Image, error) {
 	return h.decodeImage(gsplanes)
 }
 
-// decodeImage 解码图像
-// 入参: gsplanes 图像平面集合
+// decodeImage 根据索引位平面在半色调网格上放置字典模式
+// 入参: gsplanes 从低位到高位排列的模式索引位平面
 // 返回: *Image 图像, error 错误信息
 func (h *HTRDProc) decodeImage(gsplanes []*Image) (*Image, error) {
 	htReg := NewImage(int32(h.HBW), int32(h.HBH))

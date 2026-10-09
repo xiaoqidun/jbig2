@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-// GRRDProc 通用细化区域解码过程
+// GRRDProc 通用细化区域的解码参数
 type GRRDProc struct {
 	GRTEMPLATE    bool
 	TPGRON        bool
@@ -30,8 +30,8 @@ type GRRDProc struct {
 	GRAT          [4]int8
 }
 
-// NewGRRDProc 创建通用细化区域解码过程对象
-// 返回: *GRRDProc 对象
+// NewGRRDProc 创建通用细化区域解码器
+// 返回: *GRRDProc 通用细化区域解码器
 func NewGRRDProc() *GRRDProc {
 	return &GRRDProc{}
 }
@@ -44,7 +44,7 @@ func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*I
 	return g.decodeInto(arithDecoder, grContexts, nil)
 }
 
-// decodeInto 解码到复用图像
+// decodeInto 解码通用细化区域，尺寸一致时复用目标图像
 // 入参: arithDecoder 算术解码器, grContexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, reuse *Image) (*Image, error) {
@@ -95,7 +95,7 @@ func (g *GRRDProc) decodeReferenceTemplate0(decoder *ArithDecoder, contexts []Ar
 	return img, nil
 }
 
-// decodeTemplate0Opt 模板0优化解码
+// decodeTemplate0Opt 使用固定自适应像素位置解码细化模板0
 // 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
@@ -218,7 +218,7 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 	return grReg, nil
 }
 
-// decodeTemplate1Opt 模板1优化解码
+// decodeTemplate1Opt 通过滚动更新像素上下文解码细化模板1
 // 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
@@ -296,7 +296,7 @@ func typicalPixelFromRows(previousRow, row, nextRow []byte, x, width int32) (uin
 	return value, predictable
 }
 
-// decodeTemplate0Custom 模板0自适应位置解码
+// decodeTemplate0Custom 按指定的自适应像素位置解码细化模板0
 // 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeTemplate0Custom(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {

@@ -58,7 +58,7 @@ func prepareEncodedPage(src image.Image, opts *Options, number uint32, endPage b
 	}, nil
 }
 
-// encodeGenericRegion 使用模板0和名义自适应像素编码通用区域
+// encodeGenericRegion 使用模板0的固定自适应像素位置编码通用区域
 // 入参: img 打包位图, limit 最大编码字节数
 // 返回: []byte 算术编码数据, error 错误信息
 func encodeGenericRegion(img *Image, limit int) ([]byte, error) {

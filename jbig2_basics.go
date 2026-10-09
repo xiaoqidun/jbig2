@@ -31,7 +31,7 @@ const (
 	JBig2MaxImageSize = 65535
 )
 
-// ComposeOp 组合操作类型
+// ComposeOp 二值图像的像素组合方式
 type ComposeOp int
 
 const (
@@ -47,7 +47,7 @@ const (
 	ComposeReplace ComposeOp = 4
 )
 
-// RegionInfo 区域信息
+// RegionInfo 区域尺寸、页面位置及组合标志
 type RegionInfo struct {
 	Width  int32
 	Height int32
@@ -56,7 +56,7 @@ type RegionInfo struct {
 	Flags  uint8
 }
 
-// HuffmanCode 霍夫曼编码
+// HuffmanCode 霍夫曼码字、码长及对应的数值范围
 type HuffmanCode struct {
 	Codelen    int32
 	Code       int32
@@ -74,7 +74,7 @@ type Rect struct {
 	Bottom int32
 }
 
-// ceilLog2 计算表示指定数量所需的位数
+// ceilLog2 计算指定数量的符号所需的最小索引位数
 // 入参: value 数量
 // 返回: uint8 位数
 func ceilLog2(value uint32) uint8 {

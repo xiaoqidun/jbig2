@@ -60,7 +60,7 @@ type SegmentFlags struct {
 	DeferredNonRetain   bool
 }
 
-// Segment 段结构
+// Segment 保存段头、解析状态及解码结果
 type Segment struct {
 	colorImage               *image.NRGBA64
 	Number                   uint32
@@ -83,8 +83,8 @@ type Segment struct {
 	GRContexts               []ArithCtx
 }
 
-// NewSegment 创建段对象
-// 返回: *Segment 段对象
+// NewSegment 创建尚未解析的段
+// 返回: *Segment 段
 func NewSegment() *Segment {
 	return &Segment{
 		State:      JBig2SegmentHeaderUnparsed,

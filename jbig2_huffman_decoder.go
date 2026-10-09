@@ -19,7 +19,7 @@ import "errors"
 // maxHuffmanCodeLength 最大霍夫曼码长
 const maxHuffmanCodeLength = 32
 
-// TableLine 霍夫曼表行定义
+// TableLine 霍夫曼表条目的前缀长度、范围位数及基值
 type TableLine struct {
 	PrefLen  int32
 	RangeLen int32
@@ -27,7 +27,7 @@ type TableLine struct {
 }
 
 // HuffmanTable 霍夫曼表
-// IsOK表示构建是否成功，修改表字段不会同步更新已生成的解码索引
+// IsOK方法返回表是否构建成功，修改字段不会同步更新已生成的解码索引
 type HuffmanTable struct {
 	HTOOB    bool
 	NTEMP    uint32
@@ -48,7 +48,7 @@ type huffmanCodeIndex struct {
 }
 
 // NewStandardTable 从标准表创建霍夫曼表
-// 索引无效时返回IsOK为false的表
+// 索引无效时，表的IsOK方法返回false
 // 入参: idx 表索引，范围为1至15
 // 返回: *HuffmanTable 霍夫曼表
 func NewStandardTable(idx int) *HuffmanTable {
@@ -58,7 +58,7 @@ func NewStandardTable(idx int) *HuffmanTable {
 }
 
 // NewTableFromStream 从流创建霍夫曼表
-// 推进位流位置，解析失败时返回IsOK为false的表
+// 推进位流位置；解析失败时，表的IsOK方法返回false
 // 入参: stream 位流
 // 返回: *HuffmanTable 霍夫曼表
 func NewTableFromStream(stream *BitStream) *HuffmanTable {
@@ -67,14 +67,14 @@ func NewTableFromStream(stream *BitStream) *HuffmanTable {
 	return ht
 }
 
-// Size 获取霍夫曼表大小
-// 返回: uint32 大小
+// Size 获取霍夫曼表的条目数
+// 返回: uint32 条目数
 func (h *HuffmanTable) Size() uint32 {
 	return uint32(len(h.CODES))
 }
 
-// IsHTOOB 是否包含越界符
-// 返回: bool 是否包含
+// IsHTOOB 检查霍夫曼表是否包含OOB标志
+// 返回: bool 是否包含OOB标志
 func (h *HuffmanTable) IsHTOOB() bool {
 	return h.HTOOB
 }
@@ -85,7 +85,7 @@ func (h *HuffmanTable) IsOK() bool {
 	return h.Ok
 }
 
-// parseFromStandardTable 从标准表解析
+// parseFromStandardTable 根据标准表定义构建解码表
 // 入参: idx 表索引
 // 返回: bool 是否成功
 func (h *HuffmanTable) parseFromStandardTable(idx int) bool {
@@ -105,7 +105,7 @@ func (h *HuffmanTable) parseFromStandardTable(idx int) bool {
 	return h.finalize()
 }
 
-// parseFromCodedBuffer 从编码位流解析
+// parseFromCodedBuffer 从位流读取自定义表参数并构建解码表
 // 入参: stream 位流
 // 返回: bool 是否成功
 func (h *HuffmanTable) parseFromCodedBuffer(stream *BitStream) bool {
@@ -208,16 +208,16 @@ type HuffmanDecoder struct {
 	stream *BitStream
 }
 
-// NewHuffmanDecoder 创建新的霍夫曼解码器
+// NewHuffmanDecoder 创建霍夫曼解码器
 // 入参: stream 位流
-// 返回: *HuffmanDecoder 解码器对象
+// 返回: *HuffmanDecoder 解码器
 func NewHuffmanDecoder(stream *BitStream) *HuffmanDecoder {
 	return &HuffmanDecoder{stream: stream}
 }
 
 // DecodeAValue 解码一个数值
 // 成功时写入result，遇到OOB或解码失败时不修改result
-// 入参: table 霍夫曼表, result 结果指针
+// 入参: table 霍夫曼表, result 解码数值的接收地址
 // 返回: int 状态码，0表示成功，JBig2OOB表示越界符，-1表示解码失败
 func (h *HuffmanDecoder) DecodeAValue(table *HuffmanTable, result *int32) int {
 	if table.decoder == nil {
@@ -294,7 +294,7 @@ func newHuffmanCodeIndex(codes []HuffmanCode) (*huffmanCodeIndex, error) {
 }
 
 // buildHuffmanCodeIndex 构建规范霍夫曼解码索引
-// 入参: codes 霍夫曼编码, maxCodeLen 最大码长, codeCounts 码长数量, firstCodes 首码
+// 入参: codes 霍夫曼码字, maxCodeLen 最大码长, codeCounts 各码长的码字数量, firstCodes 各码长的首个码字
 // 返回: *huffmanCodeIndex 解码索引
 func buildHuffmanCodeIndex(
 	codes []HuffmanCode,
@@ -327,7 +327,7 @@ func buildHuffmanCodeIndex(
 	}
 }
 
-// Decode 解码一个霍夫曼编码索引
+// Decode 读取一个霍夫曼码字并返回对应条目索引
 // 入参: stream 位流
 // 返回: int 编码索引, error 错误信息
 func (h *huffmanCodeIndex) Decode(stream *BitStream) (int, error) {
@@ -350,7 +350,7 @@ func (h *huffmanCodeIndex) Decode(stream *BitStream) (int, error) {
 
 // huffmanCodeLayout 计算规范霍夫曼编码布局
 // 入参: codes 霍夫曼编码
-// 返回: uint32 最大码长, [33]uint32 码长数量, [33]uint32 首码, error 错误信息
+// 返回: uint32 最大码长, [33]uint32 各码长的码字数量, [33]uint32 各码长的首个码字, error 错误信息
 func huffmanCodeLayout(codes []HuffmanCode) (
 	uint32,
 	[maxHuffmanCodeLength + 1]uint32,

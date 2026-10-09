@@ -14,7 +14,7 @@
 
 package jbig2
 
-// arithEncoder 算术编码状态
+// arithEncoder 算术编码寄存器与输出缓冲
 type arithEncoder struct {
 	a       uint32
 	c       uint32
@@ -26,14 +26,14 @@ type arithEncoder struct {
 	err     error
 }
 
-// newArithEncoder 创建算术编码状态
+// newArithEncoder 创建算术编码器
 // 入参: limit 最大输出字节数
-// 返回: *arithEncoder 编码状态
+// 返回: *arithEncoder 算术编码器
 func newArithEncoder(limit int) *arithEncoder {
 	return &arithEncoder{a: defaultAValue, ct: 12, limit: limit}
 }
 
-// encode 编码1位并更新上下文
+// encode 编码一个二进制符号并更新上下文
 // 入参: cx 上下文, bit 像素位
 func (e *arithEncoder) encode(cx *ArithCtx, bit uint8) {
 	state := arithDecodeStates[cx.state]
@@ -67,7 +67,7 @@ func (e *arithEncoder) encode(cx *ArithCtx, bit uint8) {
 	}
 }
 
-// byteOut 输出确定字节并处理进位和位填充
+// byteOut 写出码字节并处理进位与位填充
 func (e *arithEncoder) byteOut() {
 	if e.b != 0xff && e.c&0x08000000 != 0 {
 		e.b++
@@ -88,7 +88,7 @@ func (e *arithEncoder) byteOut() {
 	}
 }
 
-// appendByte 写入受限输出缓冲
+// appendByte 在输出长度限制内追加一个字节
 // 入参: value 字节值
 func (e *arithEncoder) appendByte(value byte) {
 	if e.err != nil {

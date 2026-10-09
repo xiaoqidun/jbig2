@@ -14,20 +14,16 @@
 
 package jbig2
 
+// 通用区域模板的典型预测上下文索引、位移和像素掩码
 var (
-	// kOptConstant1 优化常量1
-	kOptConstant1 = []uint16{0x9b25, 0x0795, 0x00e5}
-	// kOptConstant9 优化常量9
-	kOptConstant9 = []uint{0x000c, 0x0009, 0x0007}
-	// kOptConstant10 优化常量10
+	kOptConstant1  = []uint16{0x9b25, 0x0795, 0x00e5}
+	kOptConstant9  = []uint{0x000c, 0x0009, 0x0007}
 	kOptConstant10 = []uint32{0x0007, 0x000f, 0x0007}
-	// kOptConstant11 优化常量11
 	kOptConstant11 = []uint32{0x001f, 0x001f, 0x000f}
-	// kOptConstant12 优化常量12
 	kOptConstant12 = []uint32{0x000f, 0x0007, 0x0003}
 )
 
-// decodeTemplate0Opt3 模板0优化3解码
+// decodeTemplate0Opt3 使用固定自适应像素位置解码模板0
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2SegmentState {
@@ -154,29 +150,29 @@ func (g *GRDProc) decodeTemplate0Extended(state *ProgressiveArithDecodeState) JB
 	return JBig2SegmentParseComplete
 }
 
-// decodeTemplate0Unopt 模板0非优化解码
+// decodeTemplate0Unopt 按指定的自适应像素位置解码模板0
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate0Unopt(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	return g.decodeTemplateUnopt(state, 0)
 }
 
-// decodeTemplate1Opt3 模板1优化3解码
+// decodeTemplate1Opt3 使用固定自适应像素位置解码模板1
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate1Opt3(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	return g.decodeTemplateOpt(state, 1)
 }
 
-// decodeTemplate1Unopt 模板1非优化解码
+// decodeTemplate1Unopt 按指定的自适应像素位置解码模板1
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate1Unopt(state *ProgressiveArithDecodeState) JBig2SegmentState {
 	return g.decodeTemplateUnopt(state, 1)
 }
 
-// decodeTemplate23Opt3 模板2/3优化3解码
-// 入参: state 解码状态, opt 选项
+// decodeTemplate23Opt3 使用固定自适应像素位置解码模板2或3
+// 入参: state 解码状态, opt 模板编号
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate23Opt3(state *ProgressiveArithDecodeState, opt int) JBig2SegmentState {
 	if opt == 3 {
@@ -185,8 +181,8 @@ func (g *GRDProc) decodeTemplate23Opt3(state *ProgressiveArithDecodeState, opt i
 	return g.decodeTemplateOpt(state, opt)
 }
 
-// decodeTemplateOpt 通用算术解码名义模板
-// 入参: state 解码状态, opt 模板选项
+// decodeTemplateOpt 通过滚动更新像素上下文解码固定位置模板
+// 入参: state 解码状态, opt 模板编号
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int) JBig2SegmentState {
 	img := *state.Image
@@ -263,7 +259,7 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 	return JBig2SegmentParseComplete
 }
 
-// decodeTemplate3Opt 模板3名义位置算术解码
+// decodeTemplate3Opt 通过滚动更新像素上下文解码固定位置的模板3
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2SegmentState {
@@ -306,8 +302,8 @@ func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2Se
 	return JBig2SegmentParseComplete
 }
 
-// decodeTemplateUnopt 通用算术解码
-// 入参: state 解码状态, opt 选项
+// decodeTemplateUnopt 按模板及自适应像素位置逐像素解码
+// 入参: state 解码状态, opt 模板编号
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplateUnopt(state *ProgressiveArithDecodeState, opt int) JBig2SegmentState {
 	img := *state.Image
@@ -376,7 +372,7 @@ func (g *GRDProc) decodeTemplateUnopt(state *ProgressiveArithDecodeState, opt in
 	return JBig2SegmentParseComplete
 }
 
-// decodeTemplate3Unopt 模板3非优化解码
+// decodeTemplate3Unopt 按指定的自适应像素位置解码模板3
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) decodeTemplate3Unopt(state *ProgressiveArithDecodeState) JBig2SegmentState {

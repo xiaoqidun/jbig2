@@ -14,13 +14,13 @@
 
 package jbig2
 
-// defaultAValue 默认A值
+// defaultAValue 算术编码区间寄存器A的初始值及归一化阈值
 const defaultAValue = 0x8000
 
-// arithQeStateCount Qe状态数量
+// arithQeStateCount 算术编码的概率状态数量
 const arithQeStateCount = 47
 
-// kQeTable Qe表
+// kQeTable 算术编码的概率估计及状态转移表
 var kQeTable = [128]ArithQe{
 	{0x5601, 1, 1, true}, {0x3401, 2, 6, false}, {0x1801, 3, 9, false},
 	{0x0AC1, 4, 12, false}, {0x0521, 5, 29, false}, {0x0221, 38, 33, false},
@@ -40,14 +40,14 @@ var kQeTable = [128]ArithQe{
 	{0x0001, 45, 43, false}, {0x5601, 46, 46, false},
 }
 
-// arithDecodeState 算术解码状态
+// arithDecodeState 概率估计值及合并MPS位的后继状态
 type arithDecodeState struct {
 	qe   uint32
 	nmps uint8
 	nlps uint8
 }
 
-// arithDecodeStates 算术解码状态表
+// arithDecodeStates 按概率状态和MPS位预计算的解码状态表
 var arithDecodeStates = func() (table [256]arithDecodeState) {
 	for state := range table {
 		qe := kQeTable[state>>1]
@@ -60,18 +60,18 @@ var arithDecodeStates = func() (table [256]arithDecodeState) {
 	return
 }()
 
-// arithIntDecodeData 算术整数解码数据
+// arithIntDecodeData 算术整数各数值范围的位数与基值
 type arithIntDecodeData struct {
 	nNeedBits int
 	nValue    int32
 }
 
-// kArithIntDecodeData 算术整数解码数据表
+// kArithIntDecodeData 算术整数各数值范围的解码参数
 var kArithIntDecodeData = []arithIntDecodeData{
 	{2, 0}, {4, 4}, {6, 20}, {8, 84}, {12, 340}, {32, 4436},
 }
 
-// ArithQe 算术编码状态
+// ArithQe 算术编码的概率估计值及状态转移参数
 type ArithQe struct {
 	Qe     uint16
 	NMPS   uint8
@@ -79,13 +79,13 @@ type ArithQe struct {
 	Switch bool
 }
 
-// ArithCtx 算术解码上下文
+// ArithCtx 算术编解码的概率状态与MPS位
 type ArithCtx struct {
 	state uint8
 }
 
-// DecodeNLPS 解码NLPS
-// 入参: qe 算术编码状态
+// DecodeNLPS 返回当前低概率符号并转移到对应的后继状态
+// 入参: qe 概率估计及状态转移参数
 // 返回: int 解码值
 func (c *ArithCtx) DecodeNLPS(qe ArithQe) int {
 	mps := c.state & 1
@@ -97,8 +97,8 @@ func (c *ArithCtx) DecodeNLPS(qe ArithQe) int {
 	return d
 }
 
-// DecodeNMPS 解码NMPS
-// 入参: qe 算术编码状态
+// DecodeNMPS 返回当前高概率符号并转移到对应的后继状态
+// 入参: qe 概率估计及状态转移参数
 // 返回: int 解码值
 func (c *ArithCtx) DecodeNMPS(qe ArithQe) int {
 	mps := c.state & 1
@@ -106,7 +106,7 @@ func (c *ArithCtx) DecodeNMPS(qe ArithQe) int {
 	return int(mps)
 }
 
-// MPS 获取当前较大概率符号
+// MPS 获取当前高概率符号
 // 返回: int 符号值，取值为0或1
 func (c *ArithCtx) MPS() int {
 	return int(c.state & 1)
@@ -128,9 +128,9 @@ type ArithDecoder struct {
 	complete bool
 }
 
-// NewArithDecoder 创建新的算术解码器
+// NewArithDecoder 创建算术解码器
 // 入参: stream 位流
-// 返回: *ArithDecoder 解码器对象
+// 返回: *ArithDecoder 解码器
 func NewArithDecoder(stream *BitStream) *ArithDecoder {
 	ad := &ArithDecoder{stream: stream, a: defaultAValue}
 	ad.b = stream.GetCurByteArith()
@@ -141,9 +141,9 @@ func NewArithDecoder(stream *BitStream) *ArithDecoder {
 	return ad
 }
 
-// Decode 解码1位并更新上下文
+// Decode 解码一个二进制符号并更新上下文
 // 入参: cx 上下文
-// 返回: int 结果
+// 返回: int 解码后的位值
 func (ad *ArithDecoder) Decode(cx *ArithCtx) int {
 	qe := &arithDecodeStates[cx.state]
 	qeValue := qe.qe
@@ -195,7 +195,7 @@ func (ad *ArithDecoder) IsComplete() bool {
 	return ad.complete
 }
 
-// byteIn 读入字节
+// byteIn 补充算术码字，处理字节填充和终止标记
 func (ad *ArithDecoder) byteIn() {
 	if ad.b == 0xff {
 		b1 := ad.stream.GetNextByteArith()
@@ -218,7 +218,7 @@ func (ad *ArithDecoder) byteIn() {
 	}
 }
 
-// readValueA 读取A值
+// readValueA 归一化算术编码区间并补充码字位
 func (ad *ArithDecoder) readValueA() {
 	for {
 		if ad.ct == 0 {
@@ -238,15 +238,15 @@ type ArithIntDecoder struct {
 	iax [512]ArithCtx
 }
 
-// NewArithIntDecoder 创建新的算术整数解码器
-// 返回: *ArithIntDecoder 解码器对象
+// NewArithIntDecoder 创建算术整数解码器
+// 返回: *ArithIntDecoder 解码器
 func NewArithIntDecoder() *ArithIntDecoder {
 	return &ArithIntDecoder{}
 }
 
 // Decode 解码算术整数
 // 入参: decoder 算术解码器
-// 返回: int32 结果, bool 是否为有效数值，遇到OOB标志时返回0和false
+// 返回: int32 整数值, bool 是否为有效数值，遇到OOB标志时返回0和false
 func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 	prev := 1
 	s := decoder.Decode(&aid.iax[prev])
@@ -279,22 +279,22 @@ func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 	return val, true
 }
 
-// ArithIaidDecoder IAID解码器
+// ArithIaidDecoder 符号标识的算术解码器
 type ArithIaidDecoder struct {
 	iaid         []ArithCtx
 	sbsymCodeLen uint8
 }
 
-// NewArithIaidDecoder 创建新的IAID解码器
+// NewArithIaidDecoder 创建符号标识的算术解码器
 // 入参: sbsymCodeLen 符号编码长度
-// 返回: *ArithIaidDecoder 解码器对象
+// 返回: *ArithIaidDecoder 解码器
 func NewArithIaidDecoder(sbsymCodeLen uint8) *ArithIaidDecoder {
 	return &ArithIaidDecoder{iaid: make([]ArithCtx, 1<<sbsymCodeLen), sbsymCodeLen: sbsymCodeLen}
 }
 
-// Decode 解码
+// Decode 解码符号标识
 // 入参: decoder 算术解码器
-// 返回: uint32 结果, error 错误信息
+// 返回: uint32 解码值, error 错误信息
 func (aid *ArithIaidDecoder) Decode(decoder *ArithDecoder) (uint32, error) {
 	prev := 1
 	for i := uint8(0); i < aid.sbsymCodeLen; i++ {

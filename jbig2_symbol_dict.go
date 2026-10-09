@@ -22,13 +22,13 @@ type SymbolDict struct {
 	Images             []*Image
 }
 
-// NewSymbolDict 创建符号字典对象
-// 返回: *SymbolDict 符号字典对象
+// NewSymbolDict 创建符号字典
+// 返回: *SymbolDict 符号字典
 func NewSymbolDict() *SymbolDict {
 	return &SymbolDict{}
 }
 
-// DeepCopy 深拷贝符号字典
+// DeepCopy 复制符号图像及算术上下文，副本不共享像素或上下文数据
 // 返回: *SymbolDict 符号字典副本
 func (s *SymbolDict) DeepCopy() *SymbolDict {
 	dst := NewSymbolDict()
@@ -49,7 +49,7 @@ func (s *SymbolDict) DeepCopy() *SymbolDict {
 
 // AddImage 添加图像到字典
 // 保存图像引用，不复制像素数据
-// 入参: image 图像对象
+// 入参: image 图像
 func (s *SymbolDict) AddImage(image *Image) {
 	s.Images = append(s.Images, image)
 }
@@ -63,7 +63,7 @@ func (s *SymbolDict) NumImages() int {
 // GetImage 从字典获取图像
 // 返回内部图像而非副本，索引无效时返回nil
 // 入参: index 索引
-// 返回: *Image 图像对象
+// 返回: *Image 图像
 func (s *SymbolDict) GetImage(index int) *Image {
 	if index < 0 || index >= len(s.Images) {
 		return nil
@@ -71,30 +71,30 @@ func (s *SymbolDict) GetImage(index int) *Image {
 	return s.Images[index]
 }
 
-// GbContexts 获取算术编码通用上下文
+// GbContexts 获取通用区域的算术上下文
 // 返回内部切片而非副本，修改切片会改变字典上下文
-// 返回: []ArithCtx 上下文集合
+// 返回: []ArithCtx 上下文切片
 func (s *SymbolDict) GbContexts() []ArithCtx {
 	return s.gbContexts
 }
 
-// GrContexts 获取算术编码细化上下文
+// GrContexts 获取细化区域的算术上下文
 // 返回内部切片而非副本，修改切片会改变字典上下文
-// 返回: []ArithCtx 上下文集合
+// 返回: []ArithCtx 上下文切片
 func (s *SymbolDict) GrContexts() []ArithCtx {
 	return s.grContexts
 }
 
-// SetGbContexts 设置算术编码通用上下文
+// SetGbContexts 设置通用区域的算术上下文
 // 保存切片引用，不复制上下文
-// 入参: contexts 上下文集合
+// 入参: contexts 上下文切片
 func (s *SymbolDict) SetGbContexts(contexts []ArithCtx) {
 	s.gbContexts = contexts
 }
 
-// SetGrContexts 设置算术编码细化上下文
+// SetGrContexts 设置细化区域的算术上下文
 // 保存切片引用，不复制上下文
-// 入参: contexts 上下文集合
+// 入参: contexts 上下文切片
 func (s *SymbolDict) SetGrContexts(contexts []ArithCtx) {
 	s.grContexts = contexts
 }

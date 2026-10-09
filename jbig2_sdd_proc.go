@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-// SDDProc 符号字典解码过程
+// SDDProc 符号字典的解码参数
 type SDDProc struct {
 	implicitRefinement bool
 	SDHUFF             bool
@@ -38,13 +38,13 @@ type SDDProc struct {
 	SDRAT              [4]int8
 }
 
-// NewSDDProc 创建符号字典解码过程对象
-// 返回: *SDDProc 对象
+// NewSDDProc 创建符号字典解码器
+// 返回: *SDDProc 符号字典解码器
 func NewSDDProc() *SDDProc {
 	return &SDDProc{}
 }
 
-// DecodeArith 算术解码
+// DecodeArith 使用算术编码解码符号字典
 // 入参: arithDecoder 算术解码器, gbContexts 通用上下文, grContexts 细化上下文
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {
@@ -256,7 +256,7 @@ func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, count uint32, im
 	return dict
 }
 
-// DecodeHuffman 霍夫曼解码
+// DecodeHuffman 使用霍夫曼编码解码符号字典
 // 入参: stream 位流, gbContexts 通用上下文, grContexts 细化上下文
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {

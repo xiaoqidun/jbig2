@@ -16,7 +16,7 @@ package jbig2
 
 import "errors"
 
-// BitStream 位流
+// BitStream 保存输入数据及当前字节和位偏移
 type BitStream struct {
 	data         []byte
 	byteIdx      uint32
@@ -27,8 +27,8 @@ type BitStream struct {
 
 // NewBitStream 创建位流
 // 直接引用data，不复制数据
-// 入参: data 数据源, key 键值
-// 返回: *BitStream 位流对象
+// 入参: data 输入数据, key 数据标识
+// 返回: *BitStream 位流
 func NewBitStream(data []byte, key uint64) *BitStream {
 	return &BitStream{data: data, key: key}
 }
@@ -42,7 +42,7 @@ func (bs *BitStream) SetLittleEndian(le bool) {
 
 // readUint32 读取4字节整数
 // 入参: data 数据, littleEndian 是否小端序
-// 返回: uint32 结果
+// 返回: uint32 读取值
 func readUint32(data []byte, littleEndian bool) uint32 {
 	if littleEndian {
 		return uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
@@ -52,7 +52,7 @@ func readUint32(data []byte, littleEndian bool) uint32 {
 
 // readUint16 读取2字节整数
 // 入参: data 数据, littleEndian 是否小端序
-// 返回: uint16 结果
+// 返回: uint16 读取值
 func readUint16(data []byte, littleEndian bool) uint16 {
 	if littleEndian {
 		return uint16(data[0]) | uint16(data[1])<<8
@@ -63,7 +63,7 @@ func readUint16(data []byte, littleEndian bool) uint16 {
 // ReadNBits 读取指定位数的整数
 // 从当前位位置按高位优先读取，数据不足时不推进位置
 // 入参: bits 位数，范围为0至32
-// 返回: uint32 结果, error 错误信息
+// 返回: uint32 读取值, error 错误信息
 func (b *BitStream) ReadNBits(bits uint32) (uint32, error) {
 	if bits > 32 {
 		return 0, errors.New("too many bits requested")
@@ -95,9 +95,9 @@ func (b *BitStream) ReadNBits(bits uint32) (uint32, error) {
 	return result, nil
 }
 
-// peekNBits 窥视指定位数并在末尾补零
+// peekNBits 预读指定位数，不推进位置，不足部分补零
 // 入参: bits 位数
-// 返回: uint32 结果
+// 返回: uint32 读取值
 func (b *BitStream) peekNBits(bits uint32) uint32 {
 	bitPos := uint64(b.byteIdx)*8 + uint64(b.bitIdx)
 	available := uint64(len(b.data))*8 - bitPos
@@ -131,14 +131,14 @@ func (b *BitStream) peekNBits(bits uint32) uint32 {
 // ReadNBitsInt32 读取指定位数并转换为int32
 // 与ReadNBits读取结果一致，不按bits进行符号扩展
 // 入参: bits 位数
-// 返回: int32 结果, error 错误信息
+// 返回: int32 读取值, error 错误信息
 func (b *BitStream) ReadNBitsInt32(bits uint32) (int32, error) {
 	val, err := b.ReadNBits(bits)
 	return int32(val), err
 }
 
 // Read1Bit 读取1位
-// 返回: uint32 结果, error 错误信息
+// 返回: uint32 读取值, error 错误信息
 func (b *BitStream) Read1Bit() (uint32, error) {
 	if !b.IsInBounds() {
 		return 0, errors.New("out of bounds")
@@ -149,7 +149,7 @@ func (b *BitStream) Read1Bit() (uint32, error) {
 }
 
 // Read1BitBool 读取1位布尔值
-// 返回: bool 结果, error 错误信息
+// 返回: bool 位值是否为1, error 错误信息
 func (b *BitStream) Read1BitBool() (bool, error) {
 	val, err := b.Read1Bit()
 	return val != 0, err
@@ -157,7 +157,7 @@ func (b *BitStream) Read1BitBool() (bool, error) {
 
 // Read1Byte 读取1字节
 // 从当前字节位置读取，不自动进行字节对齐
-// 返回: uint8 结果, error 错误信息
+// 返回: uint8 字节值, error 错误信息
 func (b *BitStream) Read1Byte() (uint8, error) {
 	if !b.IsInBounds() {
 		return 0, errors.New("out of bounds")
@@ -169,7 +169,7 @@ func (b *BitStream) Read1Byte() (uint8, error) {
 
 // ReadInteger 读取4字节整数
 // 默认使用大端序，不自动进行字节对齐
-// 返回: uint32 结果, error 错误信息
+// 返回: uint32 读取值, error 错误信息
 func (b *BitStream) ReadInteger() (uint32, error) {
 	if uint64(b.byteIdx)+3 >= uint64(len(b.data)) {
 		return 0, errors.New("insufficient data")
@@ -181,7 +181,7 @@ func (b *BitStream) ReadInteger() (uint32, error) {
 
 // ReadShortInteger 读取2字节整数
 // 默认使用大端序，不自动进行字节对齐
-// 返回: uint16 结果, error 错误信息
+// 返回: uint16 整数值, error 错误信息
 func (b *BitStream) ReadShortInteger() (uint16, error) {
 	if uint64(b.byteIdx)+1 >= uint64(len(b.data)) {
 		return 0, errors.New("insufficient data")
@@ -191,7 +191,7 @@ func (b *BitStream) ReadShortInteger() (uint16, error) {
 	return result, nil
 }
 
-// AlignByte 字节对齐
+// AlignByte 将读取位置对齐到字节边界
 // 跳过当前字节中尚未读取的位，已对齐时不推进位置
 func (b *BitStream) AlignByte() {
 	if b.bitIdx != 0 {
@@ -199,7 +199,7 @@ func (b *BitStream) AlignByte() {
 	}
 }
 
-// GetCurByte 获取当前字节
+// GetCurByte 获取当前字节，超出数据范围时返回零
 // 返回: uint8 当前字节
 func (b *BitStream) GetCurByte() uint8 {
 	if b.IsInBounds() {
@@ -208,7 +208,7 @@ func (b *BitStream) GetCurByte() uint8 {
 	return 0
 }
 
-// IncByteIdx 增加字节索引
+// IncByteIdx 前进一个字节并清零字节内位偏移，最多前进到数据末尾
 func (b *BitStream) IncByteIdx() {
 	size := uint32(len(b.data))
 	if b.byteIdx < size {
@@ -219,7 +219,7 @@ func (b *BitStream) IncByteIdx() {
 	b.bitIdx = 0
 }
 
-// GetCurByteArith 获取算术解码当前字节
+// GetCurByteArith 获取算术解码的当前字节，超出数据范围时返回0xFF
 // 返回: uint8 当前字节
 func (b *BitStream) GetCurByteArith() uint8 {
 	if b.IsInBounds() {
@@ -228,7 +228,7 @@ func (b *BitStream) GetCurByteArith() uint8 {
 	return 0xFF
 }
 
-// GetNextByteArith 获取算术解码下一字节
+// GetNextByteArith 预读算术解码的下一字节，超出数据范围时返回0xFF
 // 返回: uint8 下一字节
 func (b *BitStream) GetNextByteArith() uint8 {
 	if uint64(b.byteIdx)+1 < uint64(len(b.data)) {
@@ -237,8 +237,8 @@ func (b *BitStream) GetNextByteArith() uint8 {
 	return 0xFF
 }
 
-// GetOffset 获取当前偏移量
-// 返回: uint32 偏移量
+// GetOffset 获取相对于数据起点的字节偏移
+// 返回: uint32 字节偏移
 func (b *BitStream) GetOffset() uint32 {
 	return b.byteIdx
 }
@@ -268,14 +268,14 @@ func (b *BitStream) AddOffset(delta uint32) {
 	}
 }
 
-// GetBitPos 获取当前位位置
-// 返回: uint32 位位置
+// GetBitPos 获取相对于数据起点的位偏移
+// 返回: uint32 位偏移
 func (b *BitStream) GetBitPos() uint32 {
 	return (b.byteIdx << 3) + b.bitIdx
 }
 
-// SetBitPos 设置位位置
-// 入参: bitPos 位位置
+// SetBitPos 设置相对于数据起点的位偏移，不检查数据范围
+// 入参: bitPos 位偏移
 func (b *BitStream) SetBitPos(bitPos uint32) {
 	b.byteIdx = bitPos >> 3
 	b.bitIdx = bitPos & 7
@@ -307,19 +307,19 @@ func (b *BitStream) GetPointer() []byte {
 	return b.data[b.byteIdx:]
 }
 
-// GetKey 获取键值
-// 返回: uint64 键值
+// GetKey 获取创建位流时传入的数据标识
+// 返回: uint64 数据标识
 func (b *BitStream) GetKey() uint64 {
 	return b.key
 }
 
-// IsInBounds 检查是否在边界内
-// 返回: bool 是否在边界内
+// IsInBounds 检查当前字节位置是否仍在数据范围内
+// 返回: bool 当前字节是否可读
 func (b *BitStream) IsInBounds() bool {
 	return b.byteIdx < uint32(len(b.data))
 }
 
-// advanceBit 前进一位
+// advanceBit 将读取位置推进一位
 func (b *BitStream) advanceBit() {
 	if b.bitIdx == 7 {
 		b.byteIdx++

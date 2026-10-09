@@ -20,9 +20,9 @@ type PatternDict struct {
 	HDPATS  []*Image
 }
 
-// NewPatternDict 创建模式字典对象
+// NewPatternDict 创建模式字典
 // 入参: dictSize 字典大小
-// 返回: *PatternDict 模式字典对象
+// 返回: *PatternDict 模式字典
 func NewPatternDict(dictSize uint32) *PatternDict {
 	return &PatternDict{
 		NUMPATS: dictSize,
@@ -30,7 +30,7 @@ func NewPatternDict(dictSize uint32) *PatternDict {
 	}
 }
 
-// DeepCopy 深拷贝模式字典
+// DeepCopy 复制模式字典及各模式的像素数据
 // 返回: *PatternDict 模式字典副本
 func (p *PatternDict) DeepCopy() *PatternDict {
 	dst := NewPatternDict(p.NUMPATS)

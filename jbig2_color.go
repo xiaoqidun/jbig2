@@ -48,7 +48,7 @@ var defaultColorPalette = func() []color.NRGBA64 {
 
 // newColorImage 创建彩色图像
 // 入参: width 宽度, height 高度
-// 返回: *image.NRGBA64 图像对象
+// 返回: *image.NRGBA64 图像
 func newColorImage(width, height int32) *image.NRGBA64 {
 	if width <= 0 || height <= 0 || uint64(width)*uint64(height) > 2147483647/8 {
 		return nil
@@ -74,7 +74,7 @@ func readColorComponent(stream *BitStream, length byte) (uint16, error) {
 }
 
 // parseColorPalette 解析调色板段
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: Result 解析结果
 func (d *Document) parseColorPalette(segment *Segment) Result {
 	flags, err := d.stream.Read1Byte()
@@ -115,7 +115,7 @@ func (d *Document) parseColorPalette(segment *Segment) Result {
 }
 
 // getColorPalette 获取区域调色板
-// 入参: segment 段对象
+// 入参: segment 段
 // 返回: []color.NRGBA64 颜色集合, error 错误信息
 func (d *Document) getColorPalette(segment *Segment) ([]color.NRGBA64, error) {
 	palette := defaultColorPalette
@@ -207,7 +207,7 @@ func paintColorMask(dst *image.NRGBA64, mask *Image, x, y int32, value color.NRG
 	}
 }
 
-// paintColorSymbol 绘制文本实例颜色
+// paintColorSymbol 按颜色游程为当前文本符号着色
 // 入参: mask 实例掩码, x 横坐标, y 纵坐标
 // 返回: error 错误信息
 func (t *TRDProc) paintColorSymbol(mask *Image, x, y int32) error {
@@ -222,7 +222,7 @@ func (t *TRDProc) paintColorSymbol(mask *Image, x, y int32) error {
 	return nil
 }
 
-// composeMonochromeColor 将黑白区域组合彩色页面
+// composeMonochromeColor 按区域组合方式将黑白位图绘制到彩色页面
 // 入参: dst 目标图像, mask 区域掩码, ri 区域信息
 func composeMonochromeColor(dst *image.NRGBA64, mask *Image, ri *RegionInfo) {
 	left := max(int64(0), int64(ri.X))
@@ -262,8 +262,8 @@ func composeMonochromeColor(dst *image.NRGBA64, mask *Image, ri *RegionInfo) {
 	}
 }
 
-// composeColorRegion 组合彩色页面区域
-// 入参: segment 段对象, ri 区域信息
+// composeColorRegion 将区域解码结果合成到彩色页面
+// 入参: segment 段, ri 区域信息
 // 返回: Result 组合结果
 func (d *Document) composeColorRegion(segment *Segment, ri *RegionInfo) Result {
 	if d.colorPage.Rect.Dy() != int(d.page.Height()) {

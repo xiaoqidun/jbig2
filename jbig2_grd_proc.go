@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-// GRDProc 通用区域解码过程
+// GRDProc 通用区域的解码参数与状态
 type GRDProc struct {
 	MMR         bool
 	GBW         uint32
@@ -36,8 +36,8 @@ type GRDProc struct {
 	replaceRect Rect
 }
 
-// NewGRDProc 创建通用区域解码过程对象
-// 返回: *GRDProc 对象
+// NewGRDProc 创建通用区域解码器
+// 返回: *GRDProc 通用区域解码器
 func NewGRDProc() *GRDProc {
 	return &GRDProc{}
 }
@@ -50,7 +50,7 @@ type ProgressiveArithDecodeState struct {
 	GbContexts   []ArithCtx
 }
 
-// StartDecodeArith 开始算术解码
+// StartDecodeArith 初始化图像并开始通用区域的算术解码
 // 图像尺寸与GBW和GBH一致时清空复用，否则创建新图像
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
@@ -74,7 +74,7 @@ func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2Segm
 	return g.ProgressiveDecodeArith(state)
 }
 
-// StartDecodeMMR 开始MMR解码
+// StartDecodeMMR 初始化图像并解码MMR通用区域
 // 入参: image 图像指针, stream 位流
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentState {
@@ -92,7 +92,7 @@ func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentS
 	return JBig2SegmentParseComplete
 }
 
-// ContinueDecode 继续解码
+// ContinueDecode 从当前行继续通用区域解码
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) ContinueDecode(state *ProgressiveArithDecodeState) JBig2SegmentState {
@@ -102,7 +102,7 @@ func (g *GRDProc) ContinueDecode(state *ProgressiveArithDecodeState) JBig2Segmen
 	return g.ProgressiveDecodeArith(state)
 }
 
-// DecodeArith 算术解码
+// DecodeArith 使用算术编码解码通用区域
 // contexts按GetHuffContextSize分配，解码过程中更新上下文
 // 入参: decoder 解码器, contexts 上下文
 // 返回: *Image 图像, error 错误信息
@@ -126,7 +126,7 @@ func (g *GRDProc) GetReplaceRect() Rect {
 	return g.replaceRect
 }
 
-// ProgressiveDecodeArith 渐进式算术解码
+// ProgressiveDecodeArith 按模板解码剩余行并记录本次更新区域
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) ProgressiveDecodeArith(state *ProgressiveArithDecodeState) JBig2SegmentState {
@@ -168,7 +168,7 @@ func (g *GRDProc) ProgressiveDecodeArith(state *ProgressiveArithDecodeState) JBi
 	return res
 }
 
-// useTemplate0Opt3 检查是否可用模板0优化3
+// useTemplate0Opt3 检查模板0的自适应像素是否位于固定优化位置
 // 返回: bool 是否可用
 func (g *GRDProc) useTemplate0Opt3() bool {
 	return g.GBAT[0] == 3 && g.GBAT[1] == -1 && g.GBAT[2] == -3 &&
@@ -176,13 +176,13 @@ func (g *GRDProc) useTemplate0Opt3() bool {
 		g.GBAT[6] == -2 && g.GBAT[7] == -2
 }
 
-// useTemplate1Opt3 检查是否可用模板1优化3
+// useTemplate1Opt3 检查模板1的自适应像素是否位于固定优化位置
 // 返回: bool 是否可用
 func (g *GRDProc) useTemplate1Opt3() bool {
 	return g.GBAT[0] == 3 && g.GBAT[1] == -1
 }
 
-// useTemplate23Opt3 检查是否可用模板23优化3
+// useTemplate23Opt3 检查模板2或3的自适应像素是否位于固定优化位置
 // 返回: bool 是否可用
 func (g *GRDProc) useTemplate23Opt3() bool {
 	return g.GBAT[0] == 2 && g.GBAT[1] == -1

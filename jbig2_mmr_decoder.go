@@ -18,6 +18,7 @@ import (
 	"errors"
 )
 
+// MMR二维编码模式及行结束、数据结束和无效码标志
 const (
 	mmrPass    = 0
 	mmrHoriz   = 1
@@ -43,6 +44,7 @@ type mmrCode struct {
 	subTable  []*mmrCode
 }
 
+// MMR模式码、黑白游程码及其查找表
 var (
 	modeCodes = [][]int{
 		{4, 0x1, mmrPass},
@@ -107,6 +109,7 @@ var (
 	modeTable  []*mmrCode
 )
 
+// MMR两级查找表的索引位数、掩码及码字对齐位置
 const (
 	firstLevelTableSize  = 8
 	firstLevelTableMask  = (1 << firstLevelTableSize) - 1
@@ -115,14 +118,15 @@ const (
 	codeOffset           = 24
 )
 
+// init 构建MMR模式及黑白游程的查找表
 func init() {
 	whiteTable = createLittleEndianTable(whiteCodes)
 	blackTable = createLittleEndianTable(blackCodes)
 	modeTable = createLittleEndianTable(modeCodes)
 }
 
-// createLittleEndianTable 创建小端序解码表
-// 入参: codes 编码集
+// createLittleEndianTable 按码字的高位前缀构建两级查找表
+// 入参: codes 码长、码字及解码值组成的条目
 // 返回: []*mmrCode 解码表
 func createLittleEndianTable(codes [][]int) []*mmrCode {
 	table := make([]*mmrCode, firstLevelTableMask+1)
@@ -160,9 +164,9 @@ type MMRDecompressor struct {
 	stream *BitStream
 }
 
-// NewMMRDecompressor 创建新的MMR解码器
+// NewMMRDecompressor 创建MMR解码器
 // 入参: width 宽度, height 高度, stream 位流
-// 返回: *MMRDecompressor 解码器对象
+// 返回: *MMRDecompressor 解码器
 func NewMMRDecompressor(width, height int, stream *BitStream) *MMRDecompressor {
 	return &MMRDecompressor{
 		width:  width,
@@ -171,9 +175,9 @@ func NewMMRDecompressor(width, height int, stream *BitStream) *MMRDecompressor {
 	}
 }
 
-// getNextCode 获取下一个编码
+// getNextCode 预读当前码字并查表，不推进位流位置
 // 入参: table 解码表
-// 返回: *mmrCode 编码对象, error 错误信息
+// 返回: *mmrCode 码字条目, error 错误信息
 func (m *MMRDecompressor) getNextCode(table []*mmrCode) (*mmrCode, error) {
 	codeWord, err := m.getNextCodeWord()
 	if err != nil {
@@ -191,7 +195,7 @@ func (m *MMRDecompressor) getNextCode(table []*mmrCode) (*mmrCode, error) {
 	return res, nil
 }
 
-// getNextCodeWord 获取下一个编码字
+// getNextCodeWord 预读查表所需的码字位并对齐到查表窗口高位
 // 返回: int 编码字, error 错误信息
 func (m *MMRDecompressor) getNextCodeWord() (int, error) {
 	if !m.stream.IsInBounds() {
@@ -201,8 +205,8 @@ func (m *MMRDecompressor) getNextCodeWord() (int, error) {
 	return int(m.stream.peekNBits(tableBits)) << (codeOffset - tableBits), nil
 }
 
-// Uncompress 解压缩图像
-// 返回: *Image 图像对象, error 错误信息
+// Uncompress 按MMR游程解码二值图像
+// 返回: *Image 图像, error 错误信息
 func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	img := NewImage(int32(m.width), int32(m.height))
 	if img == nil {
@@ -228,9 +232,9 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	return img, nil
 }
 
-// uncompress2D 2D解压缩一行
-// 入参: refOffsets 参考行偏移, refRunLength 参考行游程长度, currOffsets 当前行偏移
-// 返回: int 偏移计数, error 错误信息
+// uncompress2D 根据参考行解码当前行的像素转换位置
+// 入参: refOffsets 参考行像素转换位置, refRunLength 参考行转换位置数量, currOffsets 当前行像素转换位置
+// 返回: int 当前行转换位置数量, error 错误信息
 func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currOffsets []int) (int, error) {
 	refIdx := 0
 	currIdx := 0
@@ -339,8 +343,8 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 	return currIdx, nil
 }
 
-// fillBitmap 填充图像位图
-// 入参: img 图像对象, y 轴坐标, offsets 偏移集合, count 计数
+// fillBitmap 根据像素转换位置填充当前行的黑色游程
+// 入参: img 目标图像, y 纵坐标, offsets 像素转换位置, count 有效位置数量
 func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int) {
 	data := img.Data()
 	row := y * int(img.Stride())
@@ -362,7 +366,7 @@ func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int
 	}
 }
 
-// detectAndSkipEOL 检测并跳过EOL
+// detectAndSkipEOL 跳过连续的行结束标记
 func (m *MMRDecompressor) detectAndSkipEOL() {
 	for {
 		code, err := m.getNextCode(modeTable)

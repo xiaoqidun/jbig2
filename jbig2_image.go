@@ -58,7 +58,7 @@ func (i *Image) At(x, y int) color.Color {
 // NewImage 创建新图像
 // 初始像素为白色，尺寸无效或超出支持范围时返回nil
 // 入参: width 宽度, height 高度
-// 返回: *Image 图像对象
+// 返回: *Image 图像
 func NewImage(width, height int32) *Image {
 	if width <= 0 || height <= 0 {
 		return nil
@@ -78,8 +78,8 @@ func NewImage(width, height int32) *Image {
 }
 
 // reuseImage 复用图像缓冲
-// 入参: image 图像对象, width 宽度, height 高度
-// 返回: *Image 图像对象
+// 入参: image 图像, width 宽度, height 高度
+// 返回: *Image 图像
 func reuseImage(image *Image, width, height int32) *Image {
 	if image == nil || width <= 0 || height <= 0 {
 		return NewImage(width, height)
@@ -116,7 +116,7 @@ func (i *Image) Stride() int32 {
 	return i.stride
 }
 
-// Data 获取数据
+// Data 获取打包的像素数据
 // 返回内部切片而非副本，修改切片会改变图像，Expand可能更换底层数据
 // 返回: []byte 数据切片
 func (i *Image) Data() []byte {
@@ -159,7 +159,7 @@ func setPixelInRow(row []byte, x int32) {
 
 // GetPixel 获取像素值
 // 坐标越界时返回0
-// 入参: x 轴坐标, y 轴坐标
+// 入参: x 横坐标, y 纵坐标
 // 返回: int 像素值
 func (i *Image) GetPixel(x, y int32) int {
 	if x < 0 || x >= i.width || y < 0 || y >= i.height {
@@ -172,7 +172,7 @@ func (i *Image) GetPixel(x, y int32) int {
 
 // SetPixel 设置像素值
 // 非零值写为1，坐标越界时不修改图像
-// 入参: x 轴坐标, y 轴坐标, v 像素值
+// 入参: x 横坐标, y 纵坐标, v 像素值
 func (i *Image) SetPixel(x, y int32, v int) {
 	if x < 0 || x >= i.width || y < 0 || y >= i.height {
 		return
@@ -207,7 +207,7 @@ func (i *Image) Invert() {
 }
 
 // ComposeTo 将当前图像组合到目标图像
-// 入参: dst 目标图像, x 轴坐标, y 轴坐标, op 组合操作
+// 入参: dst 目标图像, x 横坐标, y 纵坐标, op 组合操作
 func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	if i == nil || dst == nil {
 		return
@@ -273,8 +273,8 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 	}
 }
 
-// composeOrTo 将当前图像快速或到目标图像
-// 入参: dst 目标图像, x 轴坐标, y 轴坐标
+// composeOrTo 使用按位或将当前图像合成到目标位置
+// 入参: dst 目标图像, x 横坐标, y 纵坐标
 func (i *Image) composeOrTo(dst *Image, x, y int32) {
 	shift := uint(x & 7)
 	fullBytes := i.width >> 3
@@ -357,7 +357,7 @@ func composeByte(dst, src, mask byte, op ComposeOp) byte {
 }
 
 // ComposeFrom 从源图像组合到当前图像
-// 入参: x 轴坐标, y 轴坐标, src 源图像, op 组合操作
+// 入参: x 横坐标, y 纵坐标, src 源图像, op 组合操作
 func (i *Image) ComposeFrom(x, y int32, src *Image, op ComposeOp) {
 	if src != nil {
 		src.ComposeTo(i, x, y, op)
@@ -366,8 +366,8 @@ func (i *Image) ComposeFrom(x, y int32, src *Image, op ComposeOp) {
 
 // SubImage 获取子图像
 // 返回独立副本，超出源图像的区域填充白色，尺寸无效时返回nil
-// 入参: x 轴坐标, y 轴坐标, w 宽度, h 高度
-// 返回: *Image 子图像对象
+// 入参: x 横坐标, y 纵坐标, w 宽度, h 高度
+// 返回: *Image 子图像
 func (i *Image) SubImage(x, y, w, h int32) *Image {
 	if w <= 0 || h <= 0 {
 		return nil
@@ -423,7 +423,7 @@ func (i *Image) Duplicate() *Image {
 	return newImg
 }
 
-// CopyLine 复制行
+// CopyLine 将指定源行复制到目标行
 // 入参: h 目标行号, srcH 源行号
 func (i *Image) CopyLine(h, srcH int32) {
 	if h < 0 || h >= i.height || srcH < 0 || srcH >= i.height {
