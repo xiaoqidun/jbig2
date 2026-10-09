@@ -266,6 +266,7 @@ func (e *Encoder) writePage(page *encodedPage, number uint32, endPage bool) erro
 	var region [26]byte
 	binary.BigEndian.PutUint32(region[:4], uint32(page.width))
 	binary.BigEndian.PutUint32(region[4:8], uint32(page.height))
+	region[17] = 0x08
 	copy(region[18:], []byte{3, 0xff, 0xfd, 0xff, 2, 0xfe, 0xfe, 0xfe})
 	if err := e.writeSegmentHeader(39, number, uint32(len(region)+len(page.data)), e.segmentNumber+1); err != nil {
 		return err

@@ -168,7 +168,11 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 						if decoder.IsComplete() {
 							return nil, errors.New("decoder complete prematurely")
 						}
-						bVal = decoder.Decode(&contexts[context])
+						var fast bool
+						bVal, fast = decoder.tryDecodeFast(&contexts[context])
+						if !fast {
+							bVal = decoder.Decode(&contexts[context])
+						}
 					}
 					if bVal != 0 {
 						*output |= 1 << (shift - 1)
@@ -192,7 +196,11 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 				if decoder.IsComplete() {
 					return nil, errors.New("decoder complete prematurely")
 				}
-				bVal = decoder.Decode(&contexts[context])
+				var fast bool
+				bVal, fast = decoder.tryDecodeFast(&contexts[context])
+				if !fast {
+					bVal = decoder.Decode(&contexts[context])
+				}
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)
@@ -218,7 +226,7 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 	return grReg, nil
 }
 
-// decodeTemplate1Opt 通过滚动更新像素上下文解码细化模板1
+// decodeTemplate1Opt 使用字节窗口和滚动上下文解码细化模板1
 // 入参: decoder 算术解码器, contexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx, reuse *Image) (*Image, error) {
@@ -253,7 +261,42 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 		context |= getPixelFromRow(refRow, referenceX-1, referenceWidth) << 4
 		context |= getPixelFromRow(refNextRow, referenceX+1, referenceWidth)
 		context |= getPixelFromRow(refNextRow, referenceX, referenceWidth) << 1
-		for w := int32(0); w < width; w++ {
+		interiorStart := max(int32(0), -referenceX-1)
+		interiorEnd := min(width-2, referenceWidth-referenceX-2)
+		if ltp != 0 || previousRow == nil || refPreviousRow == nil || refRow == nil || refNextRow == nil {
+			interiorEnd = 0
+		}
+		for w := int32(0); w < width; {
+			if w&7 == 0 && w >= interiorStart && w+8 < interiorEnd {
+				index := w >> 3
+				previousWindow := uint32(previousRow[index])<<8 | uint32(previousRow[index+1])
+				referenceNext := referenceX + w + 1
+				referenceIndex := referenceNext >> 3
+				referenceWindow := uint64(refPreviousRow[referenceIndex])<<40 | uint64(refPreviousRow[referenceIndex+1])<<32 |
+					uint64(refRow[referenceIndex])<<24 | uint64(refRow[referenceIndex+1])<<16 |
+					uint64(refNextRow[referenceIndex])<<8 | uint64(refNextRow[referenceIndex+1])
+				referenceWindow <<= uint(referenceNext & 7)
+				output := &row[index]
+				for shift := 7; shift >= 0; shift-- {
+					if decoder.IsComplete() {
+						return nil, errors.New("decoder complete prematurely")
+					}
+					bVal, fast := decoder.tryDecodeFast(&contexts[context])
+					if !fast {
+						bVal = decoder.Decode(&contexts[context])
+					}
+					if bVal != 0 {
+						*output |= 1 << uint(shift)
+					}
+					context = (context<<1)&0x031a | uint32(bVal)<<6 |
+						(previousWindow>>13&1)<<7 | uint32(referenceWindow>>47&1)<<5 |
+						uint32(referenceWindow>>30&1)<<2 | uint32(referenceWindow>>14&1)
+					previousWindow <<= 1
+					referenceWindow <<= 1
+				}
+				w += 8
+				continue
+			}
 			bVal := 0
 			needDecode := ltp == 0
 			if ltp != 0 {
@@ -265,7 +308,11 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 				if decoder.IsComplete() {
 					return nil, errors.New("decoder complete prematurely")
 				}
-				bVal = decoder.Decode(&contexts[context])
+				var fast bool
+				bVal, fast = decoder.tryDecodeFast(&contexts[context])
+				if !fast {
+					bVal = decoder.Decode(&contexts[context])
+				}
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)
@@ -275,6 +322,7 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 				getPixelFromRow(refPreviousRow, referenceX+w+1, referenceWidth)<<5 |
 				getPixelFromRow(refRow, referenceX+w+2, referenceWidth)<<2 |
 				getPixelFromRow(refNextRow, referenceX+w+2, referenceWidth)
+			w++
 		}
 	}
 	return grReg, nil
@@ -351,7 +399,11 @@ func (g *GRRDProc) decodeTemplate0Custom(decoder *ArithDecoder, contexts []Arith
 				if decoder.IsComplete() {
 					return nil, errors.New("decoder complete prematurely")
 				}
-				bVal = decoder.Decode(&contexts[context])
+				var fast bool
+				bVal, fast = decoder.tryDecodeFast(&contexts[context])
+				if !fast {
+					bVal = decoder.Decode(&contexts[context])
+				}
 			}
 			if bVal != 0 {
 				setPixelInRow(row, w)

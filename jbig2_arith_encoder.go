@@ -33,6 +33,23 @@ func newArithEncoder(limit int) *arithEncoder {
 	return &arithEncoder{a: defaultAValue, ct: 12, limit: limit}
 }
 
+// tryEncodeFast 尝试无需重归一化的MPS编码
+// 入参: cx 上下文, bit 像素位
+// 返回: bool 是否完成编码
+func (e *arithEncoder) tryEncodeFast(cx *ArithCtx, bit uint8) bool {
+	if bit != cx.state&1 {
+		return false
+	}
+	qe := arithDecodeStates[cx.state].qe
+	a := e.a - qe
+	if a&defaultAValue == 0 {
+		return false
+	}
+	e.a = a
+	e.c += qe
+	return true
+}
+
 // encode 编码一个二进制符号并更新上下文
 // 入参: cx 上下文, bit 像素位
 func (e *arithEncoder) encode(cx *ArithCtx, bit uint8) {

@@ -107,8 +107,15 @@ func (g *GRDProc) ContinueDecode(state *ProgressiveArithDecodeState) JBig2Segmen
 // 入参: decoder 解码器, contexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (g *GRDProc) DecodeArith(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
+	return g.decodeArithInto(decoder, contexts, nil)
+}
+
+// decodeArithInto 解码通用区域，尺寸一致时复用目标位图
+// 入参: decoder 算术解码器, contexts 上下文, img 可复用的目标位图
+// 返回: *Image 图像, error 错误信息
+func (g *GRDProc) decodeArithInto(decoder *ArithDecoder, contexts []ArithCtx, img *Image) (*Image, error) {
 	state := &ProgressiveArithDecodeState{
-		Image:        new(*Image),
+		Image:        &img,
 		ArithDecoder: decoder,
 		GbContexts:   contexts,
 	}

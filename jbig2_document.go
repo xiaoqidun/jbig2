@@ -1240,6 +1240,21 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 	return ResultSuccess
 }
 
+// canDecodeGenericRegionIntoPage 检查通用区域是否可直接写入空白页面
+// 入参: segment 段, ri 区域信息
+// 返回: bool 是否可直接解码
+func (d *Document) canDecodeGenericRegionIntoPage(segment *Segment, ri *RegionInfo) bool {
+	if d.colorPage != nil || d.pageWritten || segment.Flags.Type == 36 || ri.Flags&0x08 != 0 || d.page == nil || len(d.pageInfoList) == 0 {
+		return false
+	}
+	pi := d.pageInfoList[len(d.pageInfoList)-1]
+	if pi.IsStriped || pi.DefaultPixelValue || ri.X != 0 || ri.Y != 0 || ri.Width != d.page.Width() || ri.Height != d.page.Height() {
+		return false
+	}
+	op := composeOpFromRegionFlags(ri.Flags)
+	return op == ComposeOr || op == ComposeXor || op == ComposeReplace
+}
+
 // parseGenericRegion 解析通用区域段
 // 入参: segment 段
 // 返回: Result 解析结果
@@ -1309,10 +1324,21 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	}
 	pGRD.USESKIP = false
 	segment.ResultType = JBig2ImagePointer
+	direct := d.canDecodeGenericRegionIntoPage(segment, &ri)
 	if pGRD.MMR {
-		res := pGRD.StartDecodeMMR(&segment.Image, d.stream)
-		if res != JBig2SegmentParseComplete {
-			return ResultFailure
+		if direct {
+			if pGRD.GBW > JBig2MaxImageSize || pGRD.GBH > JBig2MaxImageSize {
+				return ResultFailure
+			}
+			segment.Image = d.page
+			if err := DecodeG4(d.stream, segment.Image); err != nil {
+				return ResultFailure
+			}
+		} else {
+			res := pGRD.StartDecodeMMR(&segment.Image, d.stream)
+			if res != JBig2SegmentParseComplete {
+				return ResultFailure
+			}
 		}
 		d.stream.AlignByte()
 	} else {
@@ -1320,7 +1346,10 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		gbContexts := make([]ArithCtx, size)
 		arithDecoder := NewArithDecoder(d.stream)
 		var err error
-		segment.Image, err = pGRD.DecodeArith(arithDecoder, gbContexts)
+		if direct {
+			segment.Image = d.page
+		}
+		segment.Image, err = pGRD.decodeArithInto(arithDecoder, gbContexts, segment.Image)
 		if err != nil {
 			return ResultFailure
 		}
@@ -1336,10 +1365,10 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	}
 	if segment.Flags.Type != 36 {
 		d.expandPageForRegion(&ri)
-		if d.colorPage == nil {
+		if d.colorPage == nil && !direct {
 			rect := pGRD.GetReplaceRect()
 			d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
-		} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
+		} else if d.colorPage != nil && d.composeColorRegion(segment, &ri) != ResultSuccess {
 			return ResultFailure
 		}
 		segment.Image = nil
