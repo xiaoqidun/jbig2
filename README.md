@@ -7,8 +7,7 @@ go get -u github.com/xiaoqidun/jbig2
 ```
 
 # 应用案例
-- [OFDGo](https://github.com/xiaoqidun/ofdgo)：使用 JBIG2 实现 OFD 图像编解码
-- [PDFGo](https://github.com/xiaoqidun/pdfgo)：使用 JBIG2 实现 PDF 图像编解码
+[OFDGo](https://github.com/xiaoqidun/ofdgo)、[PDFGo](https://github.com/xiaoqidun/pdfgo)：使用 JBIG2 实现 OFD、PDF 文档中的图像编解码
 
 # 解码全部
 ```go
