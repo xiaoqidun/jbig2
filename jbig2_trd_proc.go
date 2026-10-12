@@ -19,33 +19,6 @@ import (
 	"image"
 )
 
-// ComposeData 符号组合位置及坐标增量
-type ComposeData struct {
-	x, y      int32
-	increment int32
-}
-
-// X 获取符号左上角横坐标
-// 返回: int32 横坐标
-func (c ComposeData) X() int32 {
-	return c.x
-}
-
-// Y 获取符号左上角纵坐标
-// 返回: int32 纵坐标
-func (c ComposeData) Y() int32 {
-	return c.y
-}
-
-// Increment 获取符号组合后的S方向坐标增量
-// 返回: int32 坐标增量
-func (c ComposeData) Increment() int32 {
-	return c.increment
-}
-
-// JBig2Corner 文本符号定位时使用的参考角
-type JBig2Corner int
-
 const (
 	// JBig2CornerBottomLeft 左下角
 	JBig2CornerBottomLeft JBig2Corner = 0
@@ -56,6 +29,15 @@ const (
 	// JBig2CornerTopRight 右上角
 	JBig2CornerTopRight JBig2Corner = 3
 )
+
+// ComposeData 符号组合位置及坐标增量
+type ComposeData struct {
+	x, y      int32
+	increment int32
+}
+
+// JBig2Corner 文本符号定位时使用的参考角
+type JBig2Corner int
 
 // TRDProc 文本区域的解码参数与状态
 type TRDProc struct {
@@ -94,6 +76,24 @@ type IntDecoderState struct {
 	IADT, IAFS, IADS, IAIT, IARI *ArithIntDecoder
 	IARDW, IARDH, IARDX, IARDY   *ArithIntDecoder
 	IAID                         *ArithIaidDecoder
+}
+
+// X 获取符号左上角横坐标
+// 返回: int32 横坐标
+func (c ComposeData) X() int32 {
+	return c.x
+}
+
+// Y 获取符号左上角纵坐标
+// 返回: int32 纵坐标
+func (c ComposeData) Y() int32 {
+	return c.y
+}
+
+// Increment 获取符号组合后的S方向坐标增量
+// 返回: int32 坐标增量
+func (c ComposeData) Increment() int32 {
+	return c.increment
 }
 
 // NewTRDProc 创建文本区域解码器

@@ -36,18 +36,18 @@ type GRDProc struct {
 	replaceRect Rect
 }
 
-// NewGRDProc 创建通用区域解码器
-// 返回: *GRDProc 通用区域解码器
-func NewGRDProc() *GRDProc {
-	return &GRDProc{}
-}
-
 // ProgressiveArithDecodeState 渐进式算术解码状态
 // Image接收解码图像，GbContexts按GetHuffContextSize分配并随解码更新
 type ProgressiveArithDecodeState struct {
 	Image        **Image
 	ArithDecoder *ArithDecoder
 	GbContexts   []ArithCtx
+}
+
+// NewGRDProc 创建通用区域解码器
+// 返回: *GRDProc 通用区域解码器
+func NewGRDProc() *GRDProc {
+	return &GRDProc{}
 }
 
 // StartDecodeArith 初始化图像并开始通用区域的算术解码

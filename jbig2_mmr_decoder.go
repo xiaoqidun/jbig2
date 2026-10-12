@@ -36,13 +36,14 @@ const (
 	mmrInvalid = -2
 )
 
-// mmrCode MMR编码字
-type mmrCode struct {
-	bitLength int
-	codeWord  int
-	runLength int
-	subTable  []*mmrCode
-}
+// MMR两级查找表的索引位数、掩码及码字对齐位置
+const (
+	firstLevelTableSize  = 8
+	firstLevelTableMask  = (1 << firstLevelTableSize) - 1
+	secondLevelTableSize = 5
+	secondLevelTableMask = (1 << secondLevelTableSize) - 1
+	codeOffset           = 24
+)
 
 // MMR模式码、黑白游程码及其查找表
 var (
@@ -109,14 +110,20 @@ var (
 	modeTable  []*mmrCode
 )
 
-// MMR两级查找表的索引位数、掩码及码字对齐位置
-const (
-	firstLevelTableSize  = 8
-	firstLevelTableMask  = (1 << firstLevelTableSize) - 1
-	secondLevelTableSize = 5
-	secondLevelTableMask = (1 << secondLevelTableSize) - 1
-	codeOffset           = 24
-)
+// mmrCode MMR编码字
+type mmrCode struct {
+	bitLength int
+	codeWord  int
+	runLength int
+	subTable  []*mmrCode
+}
+
+// MMRDecompressor MMR解码器
+type MMRDecompressor struct {
+	width  int
+	height int
+	stream *BitStream
+}
 
 // init 构建MMR模式及黑白游程的查找表
 func init() {
@@ -155,13 +162,6 @@ func createLittleEndianTable(codes [][]int) []*mmrCode {
 		}
 	}
 	return table
-}
-
-// MMRDecompressor MMR解码器
-type MMRDecompressor struct {
-	width  int
-	height int
-	stream *BitStream
 }
 
 // NewMMRDecompressor 创建MMR解码器

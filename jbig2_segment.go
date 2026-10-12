@@ -19,9 +19,6 @@ import (
 	"image/color"
 )
 
-// JBig2SegmentState 段状态
-type JBig2SegmentState int
-
 const (
 	// JBig2SegmentHeaderUnparsed 段头尚未解析
 	JBig2SegmentHeaderUnparsed JBig2SegmentState = 0
@@ -34,9 +31,6 @@ const (
 	// JBig2SegmentError 段解析失败
 	JBig2SegmentError JBig2SegmentState = 4
 )
-
-// JBig2ResultType 段结果类型
-type JBig2ResultType int
 
 const (
 	// JBig2VoidPointer 无解码结果
@@ -52,6 +46,12 @@ const (
 	// JBig2ColorPalettePointer 调色板结果
 	JBig2ColorPalettePointer JBig2ResultType = 5
 )
+
+// JBig2SegmentState 段状态
+type JBig2SegmentState int
+
+// JBig2ResultType 段结果类型
+type JBig2ResultType int
 
 // SegmentFlags 段标志位
 type SegmentFlags struct {

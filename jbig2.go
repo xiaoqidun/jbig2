@@ -28,6 +28,18 @@ import (
 // jbig2Signature JBIG2文件签名
 var jbig2Signature = []byte{0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A}
 
+// grayByteTable 将每个打包字节展开为8个灰度像素的查找表
+var grayByteTable = func() (table [256]uint64) {
+	for value := range table {
+		pixels := uint64(value)
+		pixels = (pixels | pixels<<28) & 0x0000000F0000000F
+		pixels = (pixels | pixels<<14) & 0x0003000300030003
+		pixels = (pixels | pixels<<7) & 0x0101010101010101
+		table[value] = (pixels ^ 0x0101010101010101) * 0xFF
+	}
+	return
+}()
+
 // Decoder JBIG2解码器
 type Decoder struct {
 	doc       *Document
@@ -375,18 +387,6 @@ func (i *Image) ToGoImage() image.Image {
 	}
 	return img
 }
-
-// grayByteTable 将每个打包字节展开为8个灰度像素的查找表
-var grayByteTable = func() (table [256]uint64) {
-	for value := range table {
-		pixels := uint64(value)
-		pixels = (pixels | pixels<<28) & 0x0000000F0000000F
-		pixels = (pixels | pixels<<14) & 0x0003000300030003
-		pixels = (pixels | pixels<<7) & 0x0101010101010101
-		table[value] = (pixels ^ 0x0101010101010101) * 0xFF
-	}
-	return
-}()
 
 // expandGrayByte 将一个打包字节展开为8个灰度像素
 // 入参: value 打包像素

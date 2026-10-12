@@ -19,9 +19,6 @@ import (
 	"image/color"
 )
 
-// Result 段解析的状态，包括成功、失败、继续解码及页面或数据结束
-type Result int
-
 const (
 	// ResultSuccess 成功
 	ResultSuccess Result = 0
@@ -34,6 +31,9 @@ const (
 	// ResultPageCompleted 页面完成
 	ResultPageCompleted Result = 4
 )
+
+// Result 段解析的状态，包括成功、失败、继续解码及页面或数据结束
+type Result int
 
 // Document 文档上下文
 type Document struct {
@@ -54,6 +54,21 @@ type Document struct {
 	randomAccess    bool
 	Grouped         bool
 	OrgMode         int
+}
+
+// PageInfo 页面信息段中的元数据
+// Width和Height以像素为单位，Height为0xFFFFFFFF表示页面头未指定高度
+// ResolutionX和ResolutionY保留页面头中的分辨率原始值
+// DefaultPixelValue为黑白位图的默认像素值，true表示黑色
+// IsStriped表示是否分条带，MaxStripeSize为页面头声明的最大条带高度
+type PageInfo struct {
+	Width             uint32
+	Height            uint32
+	ResolutionX       uint32
+	ResolutionY       uint32
+	DefaultPixelValue bool
+	IsStriped         bool
+	MaxStripeSize     uint16
 }
 
 // GetSegments 获取段列表
@@ -80,21 +95,6 @@ func (d *Document) GetPageInfo(index int) (PageInfo, bool) {
 		return PageInfo{}, false
 	}
 	return *d.pageInfoList[index], true
-}
-
-// PageInfo 页面信息段中的元数据
-// Width和Height以像素为单位，Height为0xFFFFFFFF表示页面头未指定高度
-// ResolutionX和ResolutionY保留页面头中的分辨率原始值
-// DefaultPixelValue为黑白位图的默认像素值，true表示黑色
-// IsStriped表示是否分条带，MaxStripeSize为页面头声明的最大条带高度
-type PageInfo struct {
-	Width             uint32
-	Height            uint32
-	ResolutionX       uint32
-	ResolutionY       uint32
-	DefaultPixelValue bool
-	IsStriped         bool
-	MaxStripeSize     uint16
 }
 
 // NewDocument 创建文档对象

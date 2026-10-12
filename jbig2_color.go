@@ -21,12 +21,6 @@ import (
 	"image/draw"
 )
 
-// colorRun 颜色游程
-type colorRun struct {
-	length uint32
-	value  color.NRGBA64
-}
-
 // defaultColorPalette 默认调色板
 var defaultColorPalette = func() []color.NRGBA64 {
 	values := [...]uint32{
@@ -45,6 +39,12 @@ var defaultColorPalette = func() []color.NRGBA64 {
 	}
 	return palette
 }()
+
+// colorRun 颜色游程
+type colorRun struct {
+	length uint32
+	value  color.NRGBA64
+}
 
 // newColorImage 创建彩色图像
 // 入参: width 宽度, height 高度

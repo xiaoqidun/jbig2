@@ -40,13 +40,6 @@ var kQeTable = [128]ArithQe{
 	{0x0001, 45, 43, false}, {0x5601, 46, 46, false},
 }
 
-// arithDecodeState 概率估计值及合并MPS位的后继状态
-type arithDecodeState struct {
-	qe   uint32
-	nmps uint8
-	nlps uint8
-}
-
 // arithDecodeStates 按概率状态和MPS位预计算的解码状态表
 var arithDecodeStates = func() (table [256]arithDecodeState) {
 	for state := range table {
@@ -60,15 +53,22 @@ var arithDecodeStates = func() (table [256]arithDecodeState) {
 	return
 }()
 
+// kArithIntDecodeData 算术整数各数值范围的解码参数
+var kArithIntDecodeData = []arithIntDecodeData{
+	{2, 0}, {4, 4}, {6, 20}, {8, 84}, {12, 340}, {32, 4436},
+}
+
+// arithDecodeState 概率估计值及合并MPS位的后继状态
+type arithDecodeState struct {
+	qe   uint32
+	nmps uint8
+	nlps uint8
+}
+
 // arithIntDecodeData 算术整数各数值范围的位数与基值
 type arithIntDecodeData struct {
 	nNeedBits int
 	nValue    int32
-}
-
-// kArithIntDecodeData 算术整数各数值范围的解码参数
-var kArithIntDecodeData = []arithIntDecodeData{
-	{2, 0}, {4, 4}, {6, 20}, {8, 84}, {12, 340}, {32, 4436},
 }
 
 // ArithQe 算术编码的概率估计值及状态转移参数
@@ -82,6 +82,27 @@ type ArithQe struct {
 // ArithCtx 算术编解码的概率状态与MPS位
 type ArithCtx struct {
 	state uint8
+}
+
+// ArithDecoder 算术解码器
+type ArithDecoder struct {
+	stream   *BitStream
+	b        uint8
+	c        uint32
+	a        uint32
+	ct       uint32
+	complete bool
+}
+
+// ArithIntDecoder 算术整数解码器
+type ArithIntDecoder struct {
+	iax [512]ArithCtx
+}
+
+// ArithIaidDecoder 符号标识的算术解码器
+type ArithIaidDecoder struct {
+	iaid         []ArithCtx
+	sbsymCodeLen uint8
 }
 
 // DecodeNLPS 返回当前低概率符号并转移到对应的后继状态
@@ -116,16 +137,6 @@ func (c *ArithCtx) MPS() int {
 // 返回: uint8 状态索引
 func (c *ArithCtx) I() uint8 {
 	return c.state >> 1
-}
-
-// ArithDecoder 算术解码器
-type ArithDecoder struct {
-	stream   *BitStream
-	b        uint8
-	c        uint32
-	a        uint32
-	ct       uint32
-	complete bool
 }
 
 // NewArithDecoder 创建算术解码器
@@ -233,11 +244,6 @@ func (ad *ArithDecoder) readValueA() {
 	}
 }
 
-// ArithIntDecoder 算术整数解码器
-type ArithIntDecoder struct {
-	iax [512]ArithCtx
-}
-
 // NewArithIntDecoder 创建算术整数解码器
 // 返回: *ArithIntDecoder 解码器
 func NewArithIntDecoder() *ArithIntDecoder {
@@ -277,12 +283,6 @@ func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 		return 0, false
 	}
 	return val, true
-}
-
-// ArithIaidDecoder 符号标识的算术解码器
-type ArithIaidDecoder struct {
-	iaid         []ArithCtx
-	sbsymCodeLen uint8
 }
 
 // NewArithIaidDecoder 创建符号标识的算术解码器

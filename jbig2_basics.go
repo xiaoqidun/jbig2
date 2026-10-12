@@ -31,9 +31,6 @@ const (
 	JBig2MaxImageSize = 65535
 )
 
-// ComposeOp 二值图像的像素组合方式
-type ComposeOp int
-
 const (
 	// ComposeOr 或操作
 	ComposeOr ComposeOp = 0
@@ -46,6 +43,9 @@ const (
 	// ComposeReplace 替换操作
 	ComposeReplace ComposeOp = 4
 )
+
+// ComposeOp 二值图像的像素组合方式
+type ComposeOp int
 
 // RegionInfo 区域尺寸、页面位置及组合标志
 type RegionInfo struct {
