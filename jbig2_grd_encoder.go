@@ -16,6 +16,7 @@ package jbig2
 
 import (
 	"bytes"
+	"context"
 	"image"
 )
 
@@ -29,9 +30,12 @@ type encodedPage struct {
 }
 
 // prepareEncodedPage 准备页面并在写入前完成编码
-// 入参: src 图像, opts 编码参数, number 页号, endPage 是否包含页结束段
+// 入参: ctx 取消上下文, src 图像, opts 编码参数, number 页号, endPage 是否包含页结束段
 // 返回: *encodedPage 页面数据, error 错误信息
-func prepareEncodedPage(src image.Image, opts *Options, number uint32, endPage bool) (*encodedPage, error) {
+func prepareEncodedPage(ctx context.Context, src image.Image, opts *Options, number uint32, endPage bool) (*encodedPage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	options := normalizeEncodeOptions(opts)
 	headerSize := uint64(11)
 	if number > 255 {
@@ -44,11 +48,11 @@ func prepareEncodedPage(src image.Image, opts *Options, number uint32, endPage b
 	if options.MaxPageBytes <= overhead {
 		return nil, ErrLimitExceeded
 	}
-	img, err := packEncodeImage(src, options.MaxPixels)
+	img, err := packEncodeImage(ctx, src, options.MaxPixels)
 	if err != nil {
 		return nil, err
 	}
-	data, err := encodeGenericRegion(img, int(options.MaxPageBytes-overhead))
+	data, err := encodeGenericRegion(ctx, img, int(options.MaxPageBytes-overhead))
 	if err != nil {
 		return nil, err
 	}
@@ -62,13 +66,19 @@ func prepareEncodedPage(src image.Image, opts *Options, number uint32, endPage b
 }
 
 // encodeGenericRegion 使用模板0和典型行预测编码通用区域
-// 入参: img 打包位图, limit 最大编码字节数
+// 入参: ctx 取消上下文, img 打包位图, limit 最大编码字节数
 // 返回: []byte 算术编码数据, error 错误信息
-func encodeGenericRegion(img *Image, limit int) ([]byte, error) {
+func encodeGenericRegion(ctx context.Context, img *Image, limit int) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	contexts := make([]ArithCtx, 1<<16)
 	encoder := newArithEncoder(limit)
 	var ltp uint8
 	for y := int32(0); y < img.height; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		row := img.row(y)
 		previous := img.row(y - 1)
 		var predicted uint8
@@ -122,7 +132,17 @@ func encodeGenericRegion(img *Image, limit int) ([]byte, error) {
 			return nil, encoder.err
 		}
 	}
-	return encoder.finish()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	data, err := encoder.finish()
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // equalGenericRows 比较两行的有效像素，缺失的上一行按全白处理

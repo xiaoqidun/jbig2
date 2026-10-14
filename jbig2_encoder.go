@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -72,24 +73,35 @@ func NewEncoder(w io.Writer) *Encoder {
 // 入参: src 图像, opts 编码参数
 // 返回: error 错误信息
 func (e *Encoder) Encode(src image.Image, opts *Options) error {
+	return e.EncodeContext(context.Background(), src, opts)
+}
+
+// EncodeContext 编码下一页并响应取消，不保留ctx
+// 页准备失败或取消时不提交本页，可重试；写入阶段失败或取消后不可继续使用
+// 入参: ctx 取消上下文, src 图像, opts 编码参数
+// 返回: error 错误信息
+func (e *Encoder) EncodeContext(ctx context.Context, src image.Image, opts *Options) error {
 	if err := e.checkState(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if e.pageIndex == ^uint32(0) || e.segmentNumber+3 > uint64(^uint32(0)) {
 		return ErrLimitExceeded
 	}
 	pageNumber := e.pageIndex + 1
-	page, err := prepareEncodedPage(src, opts, pageNumber, true)
+	page, err := prepareEncodedPage(ctx, src, opts, pageNumber, true)
 	if err != nil {
 		return fmt.Errorf("jbig2: page %d: %w", pageNumber, err)
 	}
 	if !e.started {
-		if err := e.writeFileHeader(); err != nil {
+		if err := e.writeFileHeader(ctx); err != nil {
 			return err
 		}
 		e.started = true
 	}
-	if err := e.writePage(page, pageNumber, true); err != nil {
+	if err := e.writePage(ctx, page, pageNumber, true); err != nil {
 		return err
 	}
 	e.pageIndex = pageNumber
@@ -103,11 +115,22 @@ func (e *Encoder) Encode(src image.Image, opts *Options) error {
 // 入参: images 图像列表, opts 编码参数
 // 返回: error 错误信息
 func (e *Encoder) EncodeAll(images []image.Image, opts *Options) error {
+	return e.EncodeAllContext(context.Background(), images, opts)
+}
+
+// EncodeAllContext 按顺序追加全部页面并响应取消
+// 失败时保留已写入页面，未提交页面的重试约定与EncodeContext相同
+// 入参: ctx 取消上下文, images 图像列表, opts 编码参数
+// 返回: error 错误信息
+func (e *Encoder) EncodeAllContext(ctx context.Context, images []image.Image, opts *Options) error {
 	if err := e.checkState(); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for _, img := range images {
-		if err := e.Encode(img, opts); err != nil {
+		if err := e.EncodeContext(ctx, img, opts); err != nil {
 			return err
 		}
 	}
@@ -119,6 +142,13 @@ func (e *Encoder) EncodeAll(images []image.Image, opts *Options) error {
 // 未编码任何页面时返回ErrNoPages并关闭编码器，不写入空文件
 // 返回: error 错误信息
 func (e *Encoder) Close() error {
+	return e.close(context.Background())
+}
+
+// close 写入文件结束段并响应本次操作的取消
+// 入参: ctx 取消上下文
+// 返回: error 错误信息
+func (e *Encoder) close(ctx context.Context) error {
 	if e.err != nil {
 		return e.err
 	}
@@ -130,7 +160,7 @@ func (e *Encoder) Close() error {
 		e.err = ErrNoPages
 		return e.err
 	}
-	return e.writeSegmentHeader(51, 0, 0, e.segmentNumber)
+	return e.writeSegmentHeader(ctx, 51, 0, 0, e.segmentNumber)
 }
 
 // Encode 编码JBIG2单页文件
@@ -138,12 +168,20 @@ func (e *Encoder) Close() error {
 // 入参: w 写入器, src 图像, opts 编码参数
 // 返回: error 错误信息
 func Encode(w io.Writer, src image.Image, opts *Options) error {
+	return EncodeContext(context.Background(), w, src, opts)
+}
+
+// EncodeContext 编码完整单页文件并响应取消，不关闭w
+// 失败时调用方应丢弃输出，页准备和写入约定与Encoder.EncodeContext相同
+// 入参: ctx 取消上下文, w 写入器, src 图像, opts 编码参数
+// 返回: error 错误信息
+func EncodeContext(ctx context.Context, w io.Writer, src image.Image, opts *Options) error {
 	enc := NewEncoder(w)
 	enc.expectedPages = 1
-	if err := enc.Encode(src, opts); err != nil {
+	if err := enc.EncodeContext(ctx, src, opts); err != nil {
 		return err
 	}
-	return enc.Close()
+	return enc.close(ctx)
 }
 
 // EncodeAll 编码JBIG2多页文件
@@ -152,6 +190,17 @@ func Encode(w io.Writer, src image.Image, opts *Options) error {
 // 入参: w 写入器, images 图像列表, opts 编码参数
 // 返回: error 错误信息
 func EncodeAll(w io.Writer, images []image.Image, opts *Options) error {
+	return EncodeAllContext(context.Background(), w, images, opts)
+}
+
+// EncodeAllContext 编码完整多页文件并响应取消，不关闭w
+// 失败时可能已写出部分文件，调用方应丢弃失败输出
+// 入参: ctx 取消上下文, w 写入器, images 图像列表, opts 编码参数
+// 返回: error 错误信息
+func EncodeAllContext(ctx context.Context, w io.Writer, images []image.Image, opts *Options) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(images) == 0 {
 		return ErrNoPages
 	}
@@ -160,10 +209,10 @@ func EncodeAll(w io.Writer, images []image.Image, opts *Options) error {
 	}
 	enc := NewEncoder(w)
 	enc.expectedPages = uint32(len(images))
-	if err := enc.EncodeAll(images, opts); err != nil {
+	if err := enc.EncodeAllContext(ctx, images, opts); err != nil {
 		return err
 	}
-	return enc.Close()
+	return enc.close(ctx)
 }
 
 // EncodeEmbedded 编码JBIG2单页嵌入数据
@@ -172,15 +221,23 @@ func EncodeAll(w io.Writer, images []image.Image, opts *Options) error {
 // 入参: w 写入器, src 图像, opts 编码参数
 // 返回: error 错误信息
 func EncodeEmbedded(w io.Writer, src image.Image, opts *Options) error {
+	return EncodeEmbeddedContext(context.Background(), w, src, opts)
+}
+
+// EncodeEmbeddedContext 编码单页嵌入数据并响应取消，不关闭w
+// 数据组织与EncodeEmbedded相同，失败时调用方应丢弃输出
+// 入参: ctx 取消上下文, w 写入器, src 图像, opts 编码参数
+// 返回: error 错误信息
+func EncodeEmbeddedContext(ctx context.Context, w io.Writer, src image.Image, opts *Options) error {
 	enc := NewEncoder(w)
 	if err := enc.checkState(); err != nil {
 		return err
 	}
-	page, err := prepareEncodedPage(src, opts, 1, false)
+	page, err := prepareEncodedPage(ctx, src, opts, 1, false)
 	if err != nil {
 		return err
 	}
-	return enc.writePage(page, 1, false)
+	return enc.writePage(ctx, page, 1, false)
 }
 
 // checkState 检查编码器是否可继续写入
@@ -199,15 +256,23 @@ func (e *Encoder) checkState() error {
 }
 
 // write 写入完整数据并保留首次写入错误
-// 入参: data 数据
+// 入参: ctx 取消上下文, data 数据
 // 返回: error 错误信息
-func (e *Encoder) write(data []byte) error {
+func (e *Encoder) write(ctx context.Context, data []byte) error {
 	if e.err != nil {
+		return e.err
+	}
+	err := ctx.Err()
+	if err != nil {
+		e.err = fmt.Errorf("jbig2: write: %w", err)
 		return e.err
 	}
 	n, err := e.w.Write(data)
 	if err == nil && n != len(data) {
 		err = io.ErrShortWrite
+	}
+	if err == nil {
+		err = ctx.Err()
 	}
 	if err != nil {
 		e.err = fmt.Errorf("jbig2: write: %w", err)
@@ -216,51 +281,52 @@ func (e *Encoder) write(data []byte) error {
 }
 
 // writeFileHeader 写入顺序组织文件头
+// 入参: ctx 取消上下文
 // 返回: error 错误信息
-func (e *Encoder) writeFileHeader() error {
+func (e *Encoder) writeFileHeader(ctx context.Context) error {
 	var header [13]byte
 	copy(header[:8], jbig2Signature)
 	header[8] = 3
 	if e.expectedPages == 0 {
-		return e.write(header[:9])
+		return e.write(ctx, header[:9])
 	}
 	header[8] = 1
 	binary.BigEndian.PutUint32(header[9:], e.expectedPages)
-	return e.write(header[:])
+	return e.write(ctx, header[:])
 }
 
 // writeSegmentHeader 写入无引用段头
-// 入参: kind 段类型, page 页号, length 数据长度, number 段编号
+// 入参: ctx 取消上下文, kind 段类型, page 页号, length 数据长度, number 段编号
 // 返回: error 错误信息
-func (e *Encoder) writeSegmentHeader(kind byte, page, length uint32, number uint64) error {
+func (e *Encoder) writeSegmentHeader(ctx context.Context, kind byte, page, length uint32, number uint64) error {
 	var header [14]byte
 	binary.BigEndian.PutUint32(header[:4], uint32(number))
 	header[4] = kind
 	if page <= 255 {
 		header[6] = byte(page)
 		binary.BigEndian.PutUint32(header[7:11], length)
-		return e.write(header[:11])
+		return e.write(ctx, header[:11])
 	}
 	header[4] |= 0x40
 	binary.BigEndian.PutUint32(header[6:10], page)
 	binary.BigEndian.PutUint32(header[10:14], length)
-	return e.write(header[:])
+	return e.write(ctx, header[:])
 }
 
 // writePage 写入已编码的页面段
-// 入参: page 页面数据, number 页号, endPage 是否写入页结束段
+// 入参: ctx 取消上下文, page 页面数据, number 页号, endPage 是否写入页结束段
 // 返回: error 错误信息
-func (e *Encoder) writePage(page *encodedPage, number uint32, endPage bool) error {
+func (e *Encoder) writePage(ctx context.Context, page *encodedPage, number uint32, endPage bool) error {
 	var info [19]byte
 	binary.BigEndian.PutUint32(info[:4], uint32(page.width))
 	binary.BigEndian.PutUint32(info[4:8], uint32(page.height))
 	binary.BigEndian.PutUint32(info[8:12], page.resolutionX)
 	binary.BigEndian.PutUint32(info[12:16], page.resolutionY)
 	info[16] = 1
-	if err := e.writeSegmentHeader(48, number, uint32(len(info)), e.segmentNumber); err != nil {
+	if err := e.writeSegmentHeader(ctx, 48, number, uint32(len(info)), e.segmentNumber); err != nil {
 		return err
 	}
-	if err := e.write(info[:]); err != nil {
+	if err := e.write(ctx, info[:]); err != nil {
 		return err
 	}
 	var region [26]byte
@@ -268,17 +334,17 @@ func (e *Encoder) writePage(page *encodedPage, number uint32, endPage bool) erro
 	binary.BigEndian.PutUint32(region[4:8], uint32(page.height))
 	region[17] = 0x08
 	copy(region[18:], []byte{3, 0xff, 0xfd, 0xff, 2, 0xfe, 0xfe, 0xfe})
-	if err := e.writeSegmentHeader(39, number, uint32(len(region)+len(page.data)), e.segmentNumber+1); err != nil {
+	if err := e.writeSegmentHeader(ctx, 39, number, uint32(len(region)+len(page.data)), e.segmentNumber+1); err != nil {
 		return err
 	}
-	if err := e.write(region[:]); err != nil {
+	if err := e.write(ctx, region[:]); err != nil {
 		return err
 	}
-	if err := e.write(page.data); err != nil {
+	if err := e.write(ctx, page.data); err != nil {
 		return err
 	}
 	if endPage {
-		return e.writeSegmentHeader(49, number, 0, e.segmentNumber+2)
+		return e.writeSegmentHeader(ctx, 49, number, 0, e.segmentNumber+2)
 	}
 	return nil
 }

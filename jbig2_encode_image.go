@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -69,11 +70,17 @@ func encodeImageBounds(src image.Image, maxPixels uint64) (image.Rectangle, erro
 
 // packEncodeImage 获取只读二值位图
 // 打包图像借用原数据，其他图像验证全部像素后转换，不修改输入
-// 入参: src 图像, maxPixels 像素上限
+// 入参: ctx 取消上下文, src 图像, maxPixels 像素上限
 // 返回: *Image 位图, error 错误信息
-func packEncodeImage(src image.Image, maxPixels uint64) (*Image, error) {
+func packEncodeImage(ctx context.Context, src image.Image, maxPixels uint64) (*Image, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	bounds, err := encodeImageBounds(src, maxPixels)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	w, h := bounds.Dx(), bounds.Dy()
@@ -92,6 +99,9 @@ func packEncodeImage(src image.Image, maxPixels uint64) (*Image, error) {
 			return nil, ErrInvalidImage
 		}
 		for y := 0; y < h; y++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			row := img.row(int32(y))
 			for x, pixel := range gray.Pix[y*gray.Stride : y*gray.Stride+w] {
 				switch pixel {
@@ -103,17 +113,20 @@ func packEncodeImage(src image.Image, maxPixels uint64) (*Image, error) {
 				}
 			}
 		}
-		return img, nil
+		return img, ctx.Err()
 	}
 	switch src := src.(type) {
 	case *image.RGBA:
-		return packRGBAPixels(img, src.Pix, src.Stride, bounds)
+		return packRGBAPixels(ctx, img, src.Pix, src.Stride, bounds)
 	case *image.NRGBA:
-		return packRGBAPixels(img, src.Pix, src.Stride, bounds)
+		return packRGBAPixels(ctx, img, src.Pix, src.Stride, bounds)
 	case *image.Paletted:
-		return packPalettedPixels(img, src)
+		return packPalettedPixels(ctx, img, src)
 	}
 	for y := 0; y < h; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		row := img.row(int32(y))
 		for x := 0; x < w; x++ {
 			r, g, b, a := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
@@ -125,7 +138,7 @@ func packEncodeImage(src image.Image, maxPixels uint64) (*Image, error) {
 			}
 		}
 	}
-	return img, nil
+	return img, ctx.Err()
 }
 
 // validPixelBuffer 检查像素缓冲是否容纳全部有效行
@@ -136,14 +149,17 @@ func validPixelBuffer(length, stride, rowBytes, height int) bool {
 }
 
 // packRGBAPixels 验证并打包完全不透明的四通道黑白像素
-// 入参: dst 目标位图, pixels 像素缓冲, stride 行步长, bounds 源图像边界
+// 入参: ctx 取消上下文, dst 目标位图, pixels 像素缓冲, stride 行步长, bounds 源图像边界
 // 返回: *Image 黑白位图, error 错误信息
-func packRGBAPixels(dst *Image, pixels []byte, stride int, bounds image.Rectangle) (*Image, error) {
+func packRGBAPixels(ctx context.Context, dst *Image, pixels []byte, stride int, bounds image.Rectangle) (*Image, error) {
 	w, h := bounds.Dx(), bounds.Dy()
 	if !validPixelBuffer(len(pixels), stride, w*4, h) {
 		return nil, ErrInvalidImage
 	}
 	for y := 0; y < h; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		row := dst.row(int32(y))
 		src := pixels[y*stride : y*stride+w*4]
 		for x := 0; x < w; x++ {
@@ -156,19 +172,22 @@ func packRGBAPixels(dst *Image, pixels []byte, stride int, bounds image.Rectangl
 			}
 		}
 	}
-	return dst, nil
+	return dst, ctx.Err()
 }
 
 // packPalettedPixels 按调色板映射验证并打包黑白像素
-// 入参: dst 目标位图, src 调色板图像
+// 入参: ctx 取消上下文, dst 目标位图, src 调色板图像
 // 返回: *Image 黑白位图, error 错误信息
-func packPalettedPixels(dst *Image, src *image.Paletted) (*Image, error) {
+func packPalettedPixels(ctx context.Context, dst *Image, src *image.Paletted) (*Image, error) {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
 	if !validPixelBuffer(len(src.Pix), src.Stride, w, h) {
 		return nil, ErrInvalidImage
 	}
 	var colors [256]byte
 	for y := 0; y < h; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		row := dst.row(int32(y))
 		for x, index := range src.Pix[y*src.Stride : y*src.Stride+w] {
 			value := colors[index]
@@ -191,7 +210,7 @@ func packPalettedPixels(dst *Image, src *image.Paletted) (*Image, error) {
 			}
 		}
 	}
-	return dst, nil
+	return dst, ctx.Err()
 }
 
 // Binarize 将图像转换为黑白位图
