@@ -279,7 +279,7 @@ func Binarize(src image.Image, threshold uint8) (*Image, error) {
 // 返回: uint64 亮度值
 func binaryLuminance(r, g, b, a uint32) uint64 {
 	background := uint64(0xffff - a)
-	return (19595*(uint64(r)+background) + 38470*(uint64(g)+background) + 7471*(uint64(b)+background) + 32768) >> 24
+	return (19595*uint64(r) + 38470*uint64(g) + 7471*uint64(b) + background<<16 + 32768) >> 24
 }
 
 // binarizeRGBAPixels 将四通道像素合成到白色背景后按阈值二值化

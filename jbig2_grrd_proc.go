@@ -174,9 +174,7 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 							bVal = decoder.Decode(&contexts[context])
 						}
 					}
-					if bVal != 0 {
-						*output |= 1 << (shift - 1)
-					}
+					*output |= byte(bVal) << (shift - 1)
 					context = ((context << 1) & 0x19b6) | (previousWindow>>3)&0x0400 | uint32(bVal)<<9 |
 						uint32((referenceWindow>>41)&0x40) | uint32((referenceWindow>>28)&0x08) | uint32((referenceWindow>>15)&1)
 					previousWindow <<= 1
@@ -285,9 +283,7 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 					if !fast {
 						bVal = decoder.Decode(&contexts[context])
 					}
-					if bVal != 0 {
-						*output |= 1 << uint(shift)
-					}
+					*output |= byte(bVal) << uint(shift)
 					context = (context<<1)&0x031a | uint32(bVal)<<6 |
 						(previousWindow>>13&1)<<7 | uint32(referenceWindow>>47&1)<<5 |
 						uint32(referenceWindow>>30&1)<<2 | uint32(referenceWindow>>14&1)

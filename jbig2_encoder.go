@@ -25,15 +25,15 @@ import (
 
 var (
 	// ErrInvalidImage 图像为空或尺寸及存储无效
-	ErrInvalidImage = errors.New("jbig2: invalid image")
+	ErrInvalidImage = errors.New("invalid image")
 	// ErrNonBinaryImage 图像包含非黑白或非完全不透明像素
-	ErrNonBinaryImage = errors.New("jbig2: image is not binary")
+	ErrNonBinaryImage = errors.New("image is not binary")
 	// ErrLimitExceeded 编码超过尺寸或资源限制
-	ErrLimitExceeded = errors.New("jbig2: encoding limit exceeded")
+	ErrLimitExceeded = errors.New("encoding limit exceeded")
 	// ErrClosed 编码器已关闭
-	ErrClosed = errors.New("jbig2: encoder is closed")
+	ErrClosed = errors.New("encoder is closed")
 	// ErrNoPages 未提供可编码的页面
-	ErrNoPages = errors.New("jbig2: no pages to encode")
+	ErrNoPages = errors.New("no pages to encode")
 )
 
 // Options 单页无损编码参数
@@ -93,7 +93,7 @@ func (e *Encoder) EncodeContext(ctx context.Context, src image.Image, opts *Opti
 	pageNumber := e.pageIndex + 1
 	page, err := prepareEncodedPage(ctx, src, opts, pageNumber, true)
 	if err != nil {
-		return fmt.Errorf("jbig2: page %d: %w", pageNumber, err)
+		return fmt.Errorf("page %d: %w", pageNumber, err)
 	}
 	if !e.started {
 		if err := e.writeFileHeader(ctx); err != nil {
@@ -250,7 +250,7 @@ func (e *Encoder) checkState() error {
 		return ErrClosed
 	}
 	if e.w == nil {
-		return errors.New("jbig2: encoder has no writer")
+		return errors.New("encoder has no writer")
 	}
 	return nil
 }
@@ -264,7 +264,7 @@ func (e *Encoder) write(ctx context.Context, data []byte) error {
 	}
 	err := ctx.Err()
 	if err != nil {
-		e.err = fmt.Errorf("jbig2: write: %w", err)
+		e.err = fmt.Errorf("write: %w", err)
 		return e.err
 	}
 	n, err := e.w.Write(data)
@@ -275,7 +275,7 @@ func (e *Encoder) write(ctx context.Context, data []byte) error {
 		err = ctx.Err()
 	}
 	if err != nil {
-		e.err = fmt.Errorf("jbig2: write: %w", err)
+		e.err = fmt.Errorf("write: %w", err)
 	}
 	return e.err
 }
