@@ -103,8 +103,17 @@ func packEncodeImage(ctx context.Context, src image.Image, maxPixels uint64) (*I
 				return nil, err
 			}
 			row := img.row(int32(y))
-			for x, pixel := range gray.Pix[y*gray.Stride : y*gray.Stride+w] {
-				switch pixel {
+			pixels := gray.Pix[y*gray.Stride : y*gray.Stride+w]
+			x := 0
+			for ; x <= w-8; x += 8 {
+				value := binary.LittleEndian.Uint64(pixels[x:])
+				if value&0x7f7f7f7f7f7f7f7f != ((value>>7)&0x0101010101010101)*127 {
+					break
+				}
+				row[x/8] = ^byte(((value & 0x0101010101010101) * 0x8040201008040201) >> 56)
+			}
+			for ; x < w; x++ {
+				switch pixels[x] {
 				case 0:
 					setPixelInRow(row, int32(x))
 				case 255:
@@ -116,6 +125,12 @@ func packEncodeImage(ctx context.Context, src image.Image, maxPixels uint64) (*I
 		return img, ctx.Err()
 	}
 	switch src := src.(type) {
+	case *image.Gray16:
+		return packWidePixels(ctx, img, src.Pix, src.Stride, bounds, 2)
+	case *image.RGBA64:
+		return packWidePixels(ctx, img, src.Pix, src.Stride, bounds, 8)
+	case *image.NRGBA64:
+		return packWidePixels(ctx, img, src.Pix, src.Stride, bounds, 8)
 	case *image.RGBA:
 		return packRGBAPixels(ctx, img, src.Pix, src.Stride, bounds)
 	case *image.NRGBA:
@@ -123,13 +138,20 @@ func packEncodeImage(ctx context.Context, src image.Image, maxPixels uint64) (*I
 	case *image.Paletted:
 		return packPalettedPixels(ctx, img, src)
 	}
+	native, _ := src.(image.RGBA64Image)
 	for y := 0; y < h; y++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		row := img.row(int32(y))
 		for x := 0; x < w; x++ {
-			r, g, b, a := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			var r, g, b, a uint32
+			if native != nil {
+				pixel := native.RGBA64At(bounds.Min.X+x, bounds.Min.Y+y)
+				r, g, b, a = uint32(pixel.R), uint32(pixel.G), uint32(pixel.B), uint32(pixel.A)
+			} else {
+				r, g, b, a = src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			}
 			if a != 0xffff || r != g || r != b || r != 0 && r != 0xffff {
 				return nil, fmt.Errorf("%w at (%d, %d)", ErrNonBinaryImage, bounds.Min.X+x, bounds.Min.Y+y)
 			}
@@ -167,6 +189,43 @@ func packRGBAPixels(ctx context.Context, dst *Image, pixels []byte, stride int, 
 			case 0xff000000:
 				setPixelInRow(row, int32(x))
 			case 0xffffffff:
+			default:
+				return nil, fmt.Errorf("%w at (%d, %d)", ErrNonBinaryImage, bounds.Min.X+x, bounds.Min.Y+y)
+			}
+		}
+	}
+	return dst, ctx.Err()
+}
+
+// packWidePixels 直接验证并打包十六位灰度或四通道黑白像素，保留低字节检查
+// 入参: ctx 取消上下文, dst 目标位图, pixels 像素缓冲, stride 行步长, bounds 源边界, step 每像素字节数
+// 返回: *Image 黑白位图, error 错误信息
+func packWidePixels(ctx context.Context, dst *Image, pixels []byte, stride int, bounds image.Rectangle, step int) (*Image, error) {
+	w, h := bounds.Dx(), bounds.Dy()
+	if !validPixelBuffer(len(pixels), stride, w*step, h) {
+		return nil, ErrInvalidImage
+	}
+	black, white := uint64(0), uint64(0xffff)
+	if step == 8 {
+		black, white = 0xffff000000000000, ^uint64(0)
+	}
+	for y := 0; y < h; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := dst.row(int32(y))
+		src := pixels[y*stride : y*stride+w*step]
+		for x := 0; x < w; x++ {
+			var value uint64
+			if step == 8 {
+				value = binary.LittleEndian.Uint64(src[x*step:])
+			} else {
+				value = uint64(binary.LittleEndian.Uint16(src[x*step:]))
+			}
+			switch value {
+			case black:
+				setPixelInRow(row, int32(x))
+			case white:
 			default:
 				return nil, fmt.Errorf("%w at (%d, %d)", ErrNonBinaryImage, bounds.Min.X+x, bounds.Min.Y+y)
 			}
@@ -262,10 +321,17 @@ func Binarize(src image.Image, threshold uint8) (*Image, error) {
 	case *image.Paletted:
 		return binarizePalettedPixels(img, src, threshold)
 	}
+	native, _ := src.(image.RGBA64Image)
 	for y := int32(0); y < img.height; y++ {
 		row := img.row(y)
 		for x := int32(0); x < img.width; x++ {
-			r, g, b, a := src.At(bounds.Min.X+int(x), bounds.Min.Y+int(y)).RGBA()
+			var r, g, b, a uint32
+			if native != nil {
+				pixel := native.RGBA64At(bounds.Min.X+int(x), bounds.Min.Y+int(y))
+				r, g, b, a = uint32(pixel.R), uint32(pixel.G), uint32(pixel.B), uint32(pixel.A)
+			} else {
+				r, g, b, a = src.At(bounds.Min.X+int(x), bounds.Min.Y+int(y)).RGBA()
+			}
 			if binaryLuminance(r, g, b, a) < uint64(threshold) {
 				setPixelInRow(row, x)
 			}
