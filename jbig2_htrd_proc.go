@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -32,6 +33,8 @@ type HTRDProc struct {
 	HGX, HGY    int32
 	HRX, HRY    uint16
 	HPW, HPH    uint8
+	ctx         context.Context
+	budget      *decodeBudget
 }
 
 // NewHTRDProc 创建半色调区域解码器
@@ -44,13 +47,24 @@ func NewHTRDProc() *HTRDProc {
 // 入参: arithDecoder 算术解码器, gbContexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx) (*Image, error) {
+	if err := checkContext(h.ctx); err != nil {
+		return nil, err
+	}
 	var hSkip *Image
 	if h.HENABLESKIP {
+		if _, err := h.budget.checkImage(int32(h.HGW), int32(h.HGH), false); err != nil {
+			return nil, err
+		}
 		hSkip = NewImage(int32(h.HGW), int32(h.HGH))
 		if hSkip == nil {
 			return nil, errors.New("failed to create skip image")
 		}
 		for mg := uint32(0); mg < h.HGH; mg++ {
+			if mg&63 == 0 {
+				if err := checkContext(h.ctx); err != nil {
+					return nil, err
+				}
+			}
 			xPosition := int64(h.HGX) + int64(mg)*int64(h.HRY)
 			yPosition := int64(h.HGY) + int64(mg)*int64(h.HRX)
 			for ng := uint32(0); ng < h.HGW; ng++ {
@@ -64,7 +78,7 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 			}
 		}
 	}
-	hbpp := ceilLog2(h.HNUMPATS)
+	hbpp := max(ceilLog2(h.HNUMPATS), 1)
 	grd := NewGRDProc()
 	grd.MMR = h.HMMR
 	grd.GBW = h.HGW
@@ -73,6 +87,8 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 	grd.TPGDON = false
 	grd.USESKIP = h.HENABLESKIP
 	grd.SKIP = hSkip
+	grd.ctx = h.ctx
+	grd.budget = h.budget
 	if h.HTEMPLATE <= 1 {
 		grd.GBAT[0] = 3
 	} else {
@@ -90,6 +106,9 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 	gsbpp := int(hbpp)
 	gsplanes := make([]*Image, gsbpp)
 	for i := gsbpp - 1; i >= 0; i-- {
+		if err := checkContext(h.ctx); err != nil {
+			return nil, err
+		}
 		var pImage *Image
 		state := &ProgressiveArithDecodeState{
 			Image:        &pImage,
@@ -98,6 +117,9 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 		}
 		status := grd.StartDecodeArith(state)
 		if status == JBig2SegmentError {
+			if grd.err != nil {
+				return nil, grd.err
+			}
 			return nil, errors.New("arith decoding failure")
 		}
 		if pImage == nil {
@@ -115,22 +137,29 @@ func (h *HTRDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx
 // 入参: stream 位流
 // 返回: *Image 半色调区域图像, error 错误信息
 func (h *HTRDProc) DecodeMMR(stream *BitStream) (*Image, error) {
-	hbpp := ceilLog2(h.HNUMPATS)
+	if err := checkContext(h.ctx); err != nil {
+		return nil, err
+	}
+	hbpp := max(ceilLog2(h.HNUMPATS), 1)
 	gsbpp := int(hbpp)
 	gsplanes := make([]*Image, gsbpp)
-	if gsbpp == 0 {
-		return h.decodeImage(gsplanes)
-	}
 	j := gsbpp - 1
 	decoder := NewMMRDecompressor(int(h.HGW), int(h.HGH), stream)
+	decoder.ctx = h.ctx
+	decoder.budget = h.budget
 	pImage, err := decoder.Uncompress()
 	if err != nil {
 		return nil, err
 	}
 	gsplanes[j] = pImage
 	for j > 0 {
+		if err := checkContext(h.ctx); err != nil {
+			return nil, err
+		}
 		j--
 		decoder = NewMMRDecompressor(int(h.HGW), int(h.HGH), stream)
+		decoder.ctx = h.ctx
+		decoder.budget = h.budget
 		pImg, err := decoder.Uncompress()
 		if err != nil {
 			return nil, err
@@ -145,6 +174,12 @@ func (h *HTRDProc) DecodeMMR(stream *BitStream) (*Image, error) {
 // 入参: gsplanes 从低位到高位排列的模式索引位平面
 // 返回: *Image 图像, error 错误信息
 func (h *HTRDProc) decodeImage(gsplanes []*Image) (*Image, error) {
+	if err := checkContext(h.ctx); err != nil {
+		return nil, err
+	}
+	if _, err := h.budget.checkImage(int32(h.HBW), int32(h.HBH), false); err != nil {
+		return nil, err
+	}
 	htReg := NewImage(int32(h.HBW), int32(h.HBH))
 	if htReg == nil {
 		return nil, errors.New("failed to create target image")
@@ -153,6 +188,11 @@ func (h *HTRDProc) decodeImage(gsplanes []*Image) (*Image, error) {
 		htReg.Fill(true)
 	}
 	for mg := uint32(0); mg < h.HGH; mg++ {
+		if mg&63 == 0 {
+			if err := checkContext(h.ctx); err != nil {
+				return nil, err
+			}
+		}
 		xPosition := int64(h.HGX) + int64(mg)*int64(h.HRY)
 		yPosition := int64(h.HGY) + int64(mg)*int64(h.HRX)
 		for ng := uint32(0); ng < h.HGW; ng++ {

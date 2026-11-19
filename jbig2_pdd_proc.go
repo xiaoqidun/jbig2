@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -24,6 +25,8 @@ type PDDProc struct {
 	HDPW, HDPH uint8
 	GRAYMAX    uint32
 	HDTEMPLATE uint8
+	ctx        context.Context
+	budget     *decodeBudget
 }
 
 // NewPDDProc 创建模式字典解码器
@@ -44,6 +47,8 @@ func (p *PDDProc) createGRDProc() *GRDProc {
 	grd.MMR = p.HDMMR
 	grd.GBW = width
 	grd.GBH = height
+	grd.ctx = p.ctx
+	grd.budget = p.budget
 	return grd
 }
 
@@ -51,6 +56,9 @@ func (p *PDDProc) createGRDProc() *GRDProc {
 // 入参: arithDecoder 算术解码器, gbContexts 上下文
 // 返回: *PatternDict 模式字典, error 错误信息
 func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx) (*PatternDict, error) {
+	if err := checkContext(p.ctx); err != nil {
+		return nil, err
+	}
 	grd := p.createGRDProc()
 	if grd == nil {
 		return nil, errors.New("failed to create grdproc")
@@ -76,6 +84,9 @@ func (p *PDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts []ArithCtx)
 	}
 	status := grd.StartDecodeArith(state)
 	if status == JBig2SegmentError || bhdc == nil {
+		if grd.err != nil {
+			return nil, grd.err
+		}
 		return nil, errors.New("arith decoding failure")
 	}
 	return p.createPatternDict(bhdc), nil
@@ -99,6 +110,9 @@ func (p *PDDProc) createPatternDict(bhdc *Image) *PatternDict {
 // 入参: stream 位流
 // 返回: *PatternDict 模式字典, error 错误信息
 func (p *PDDProc) DecodeMMR(stream *BitStream) (*PatternDict, error) {
+	if err := checkContext(p.ctx); err != nil {
+		return nil, err
+	}
 	grd := p.createGRDProc()
 	if grd == nil {
 		return nil, errors.New("failed to create grdproc")
@@ -106,6 +120,9 @@ func (p *PDDProc) DecodeMMR(stream *BitStream) (*PatternDict, error) {
 	var bhdc *Image
 	status := grd.StartDecodeMMR(&bhdc, stream)
 	if status == JBig2SegmentError || bhdc == nil {
+		if grd.err != nil {
+			return nil, grd.err
+		}
 		return nil, errors.New("mmr decoding failure")
 	}
 	return p.createPatternDict(bhdc), nil

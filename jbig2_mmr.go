@@ -16,6 +16,7 @@ package jbig2
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 
@@ -26,17 +27,34 @@ import (
 // 入参: stream 位流, image 目标图像
 // 返回: error 错误信息
 func DecodeG4(stream *BitStream, image *Image) error {
+	return decodeG4Context(nil, stream, image)
+}
+
+// decodeG4Context 在上下文约束内将CCITT Group4数据解码到目标位图
+// 入参: ctx 上下文, stream 位流, image 目标图像
+// 返回: error 错误信息
+func decodeG4Context(ctx context.Context, stream *BitStream, image *Image) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
 	stream.AlignByte()
 	data := stream.GetPointer()
 	if data == nil {
 		return errors.New("insufficient data for g4 decode")
 	}
 	reader := bytes.NewReader(data)
+	var src io.Reader = reader
+	if ctx != nil {
+		src = &contextReader{ctx: ctx, r: reader}
+	}
 	opts := &ccitt.Options{
 		Invert: true,
 	}
-	decoder := ccitt.NewReader(reader, ccitt.MSB, ccitt.Group4, int(image.Width()), int(image.Height()), opts)
+	decoder := ccitt.NewReader(src, ccitt.MSB, ccitt.Group4, int(image.Width()), int(image.Height()), opts)
 	if _, err := io.ReadFull(decoder, image.Data()); err != nil {
+		return err
+	}
+	if err := checkContext(ctx); err != nil {
 		return err
 	}
 	consumed := int64(len(data)) - int64(reader.Len())

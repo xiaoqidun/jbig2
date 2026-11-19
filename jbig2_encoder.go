@@ -28,7 +28,7 @@ var (
 	ErrInvalidImage = errors.New("invalid image")
 	// ErrNonBinaryImage 图像包含非黑白或非完全不透明像素
 	ErrNonBinaryImage = errors.New("image is not binary")
-	// ErrLimitExceeded 编码超过尺寸或资源限制
+	// ErrLimitExceeded 编解码超过尺寸或资源限制
 	ErrLimitExceeded = errors.New("encoding limit exceeded")
 	// ErrClosed 编码器已关闭
 	ErrClosed = errors.New("encoder is closed")

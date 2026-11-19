@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 	"image"
 )
@@ -69,6 +70,8 @@ type TRDProc struct {
 	SBHUFFRDY          *HuffmanTable
 	SBHUFFRSIZE        *HuffmanTable
 	SBRAT              [4]int8
+	ctx                context.Context
+	budget             *decodeBudget
 }
 
 // IntDecoderState 整数解码器状态
@@ -168,7 +171,13 @@ func (t *TRDProc) DecodeHuffman(stream *BitStream, grContexts []ArithCtx) (*Imag
 // 入参: stream 位流, grContexts 细化上下文, sbReg 指定图像
 // 返回: *Image 图像, error 错误信息
 func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sbReg *Image) (*Image, error) {
+	if err := checkContext(t.ctx); err != nil {
+		return nil, err
+	}
 	if sbReg == nil {
+		if _, err := t.budget.checkImage(int32(t.SBW), int32(t.SBH), false); err != nil {
+			return nil, err
+		}
 		sbReg = NewImage(int32(t.SBW), int32(t.SBH))
 		if sbReg == nil {
 			return nil, errors.New("failed to create text region image")
@@ -190,6 +199,9 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 	FIRSTS := int64(0)
 	NINSTANCES := uint32(0)
 	for NINSTANCES < t.SBNUMINSTANCES {
+		if err := checkContext(t.ctx); err != nil {
+			return nil, err
+		}
 		var initialDt int32
 		if res := decoder.DecodeAValue(t.SBHUFFDT, &initialDt); res != 0 {
 			return nil, errors.New("huffman decode failed for sbhuffdt in loop")
@@ -198,6 +210,11 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 		bFirst := true
 		CURS := int64(0)
 		for {
+			if NINSTANCES&63 == 0 {
+				if err := checkContext(t.ctx); err != nil {
+					return nil, err
+				}
+			}
 			if bFirst {
 				var dfs int32
 				if res := decoder.DecodeAValue(t.SBHUFFFS, &dfs); res != 0 {
@@ -267,6 +284,9 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 					return nil, errors.New("huffman decode refine values failed")
 				}
 				stream.AlignByte()
+				if uffrsize < 0 || uint64(uffrsize) > uint64(stream.GetByteLeft()) {
+					return nil, errors.New("invalid refinement size")
+				}
 				IBOI := t.SBSYMS[IDI]
 				if IBOI == nil {
 					return nil, errors.New("failed to get iboi")
@@ -290,14 +310,17 @@ func (t *TRDProc) decodeHuffmanInto(stream *BitStream, grContexts []ArithCtx, sb
 				pGRRD.GRREFERENCEDY = refDY
 				pGRRD.TPGRON = false
 				pGRRD.GRAT = t.SBRAT
-				pArithDecoder := NewArithDecoder(stream)
+				pGRRD.ctx = t.ctx
+				pGRRD.budget = t.budget
+				subStream := NewBitStream(stream.GetPointer()[:uffrsize], stream.GetKey())
+				subStream.SetLittleEndian(stream.littleEndian)
+				pArithDecoder := NewArithDecoder(subStream)
 				var err error
 				IBI, err = pGRRD.Decode(pArithDecoder, grContexts)
 				if err != nil {
 					return nil, err
 				}
-				stream.AlignByte()
-				stream.AddOffset(2)
+				stream.AddOffset(uint32(uffrsize))
 			}
 			if IBI != nil {
 				WI := uint32(IBI.width)
@@ -335,6 +358,9 @@ func (t *TRDProc) DecodeArith(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 // 入参: arithDecoder 算术解码器, grContexts 细化上下文, ids 整数解码器状态, sbReg 指定图像
 // 返回: *Image 图像, error 错误信息
 func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, ids *IntDecoderState, sbReg *Image) (*Image, error) {
+	if err := checkContext(t.ctx); err != nil {
+		return nil, err
+	}
 	var pIADT, pIAFS, pIADS, pIAIT, pIARI, pIARDW, pIARDH, pIARDX, pIARDY *ArithIntDecoder
 	var pIAID *ArithIaidDecoder
 	if ids != nil {
@@ -377,9 +403,16 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 		pIARDY = NewArithIntDecoder()
 	}
 	if pIAID == nil {
-		pIAID = NewArithIaidDecoder(t.SBSYMCODELEN)
+		var err error
+		pIAID, err = NewArithIaidDecoder(t.SBSYMCODELEN)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if sbReg == nil {
+		if _, err := t.budget.checkImage(int32(t.SBW), int32(t.SBH), false); err != nil {
+			return nil, err
+		}
 		sbReg = NewImage(int32(t.SBW), int32(t.SBH))
 		if sbReg == nil {
 			return nil, errors.New("failed to create text region image")
@@ -400,6 +433,9 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 	NINSTANCES := uint32(0)
 	var refinementImage *Image
 	for NINSTANCES < t.SBNUMINSTANCES {
+		if err := checkContext(t.ctx); err != nil {
+			return nil, err
+		}
 		var initialDt int32
 		if res, ok := pIADT.Decode(arithDecoder); !ok {
 			return nil, errors.New("iadt decode failed")
@@ -410,6 +446,11 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 		bFirst := true
 		CURS := int64(0)
 		for {
+			if NINSTANCES&63 == 0 {
+				if err := checkContext(t.ctx); err != nil {
+					return nil, err
+				}
+			}
 			if bFirst {
 				dfs, ok := pIAFS.Decode(arithDecoder)
 				if !ok {
@@ -497,6 +538,8 @@ func (t *TRDProc) decodeArithInto(arithDecoder *ArithDecoder, grContexts []Arith
 						pGRRD.GRREFERENCEDY = refDY
 						pGRRD.TPGRON = false
 						pGRRD.GRAT = t.SBRAT
+						pGRRD.ctx = t.ctx
+						pGRRD.budget = t.budget
 						IBI, err = pGRRD.decodeInto(arithDecoder, grContexts, refinementImage)
 						if err != nil {
 							return nil, err

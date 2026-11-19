@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -34,6 +35,9 @@ type GRDProc struct {
 	decodeType  uint16
 	ltp         int
 	replaceRect Rect
+	ctx         context.Context
+	budget      *decodeBudget
+	err         error
 }
 
 // ProgressiveArithDecodeState 渐进式算术解码状态
@@ -55,11 +59,20 @@ func NewGRDProc() *GRDProc {
 // 入参: state 解码状态
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2SegmentState {
+	g.err = nil
+	if err := checkContext(g.ctx); err != nil {
+		g.err = err
+		return JBig2SegmentError
+	}
 	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
 		return JBig2SegmentError
 	}
 	created := *state.Image == nil || (*state.Image).Width() != int32(g.GBW) || (*state.Image).Height() != int32(g.GBH)
 	if created {
+		if _, err := g.budget.checkImage(int32(g.GBW), int32(g.GBH), false); err != nil {
+			g.err = err
+			return JBig2SegmentError
+		}
 		*state.Image = NewImage(int32(g.GBW), int32(g.GBH))
 	}
 	if *state.Image == nil {
@@ -78,14 +91,24 @@ func (g *GRDProc) StartDecodeArith(state *ProgressiveArithDecodeState) JBig2Segm
 // 入参: image 图像指针, stream 位流
 // 返回: JBig2SegmentState 状态
 func (g *GRDProc) StartDecodeMMR(image **Image, stream *BitStream) JBig2SegmentState {
+	g.err = nil
+	if err := checkContext(g.ctx); err != nil {
+		g.err = err
+		return JBig2SegmentError
+	}
 	if g.GBW > JBig2MaxImageSize || g.GBH > JBig2MaxImageSize {
+		return JBig2SegmentError
+	}
+	if _, err := g.budget.checkImage(int32(g.GBW), int32(g.GBH), false); err != nil {
+		g.err = err
 		return JBig2SegmentError
 	}
 	*image = NewImage(int32(g.GBW), int32(g.GBH))
 	if *image == nil {
 		return JBig2SegmentError
 	}
-	if err := DecodeG4(stream, *image); err != nil {
+	if err := decodeG4Context(g.ctx, stream, *image); err != nil {
+		g.err = err
 		return JBig2SegmentError
 	}
 	g.replaceRect = Rect{0, 0, (*image).Width(), (*image).Height()}
@@ -121,6 +144,9 @@ func (g *GRDProc) decodeArithInto(decoder *ArithDecoder, contexts []ArithCtx, im
 	}
 	res := g.StartDecodeArith(state)
 	if res == JBig2SegmentError {
+		if g.err != nil {
+			return nil, g.err
+		}
 		return nil, errors.New("decoding error")
 	}
 	return *state.Image, nil

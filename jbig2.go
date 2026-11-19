@@ -18,6 +18,7 @@ package jbig2
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/binary"
 	"errors"
 	"image"
@@ -51,7 +52,15 @@ type Decoder struct {
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	return newDecoder(r, nil, false)
+	return newDecoder(r, nil, false, nil)
+}
+
+// NewDecoderWithOptions 按指定选项创建解码器
+// 创建时在资源限制与上下文约束内读取r的全部数据，不关闭r
+// 入参: r 读取器, opts 解码选项，为nil时使用默认配置
+// 返回: *Decoder 解码器, error 错误信息
+func NewDecoderWithOptions(r io.Reader, opts *DecodeOptions) (*Decoder, error) {
+	return newDecoder(r, nil, false, opts)
 }
 
 // NewDecoderWithGlobals 创建带全局段的解码器
@@ -61,14 +70,30 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 // 入参: r 读取器, globals 全局段数据
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
-	return newDecoder(r, globals, true)
+	return newDecoder(r, globals, true, nil)
+}
+
+// NewDecoderWithGlobalsAndOptions 按指定选项创建带全局段的解码器
+// 创建时在资源限制与上下文约束内读取r的全部数据并解析全局段，不关闭r
+// 直接引用globals，不复制全局段数据
+// 入参: r 读取器, globals 全局段数据, opts 解码选项，为nil时使用默认配置
+// 返回: *Decoder 解码器, error 错误信息
+func NewDecoderWithGlobalsAndOptions(r io.Reader, globals []byte, opts *DecodeOptions) (*Decoder, error) {
+	return newDecoder(r, globals, true, opts)
 }
 
 // newDecoder 创建解码器并按需识别嵌入数据
-// 入参: r 读取器, globals 全局段数据, embedded 是否允许嵌入数据
+// 入参: r 读取器, globals 全局段数据, embedded 是否允许嵌入数据, opts 解码选项
 // 返回: *Decoder 解码器, error 错误信息
-func newDecoder(r io.Reader, globals []byte, embedded bool) (*Decoder, error) {
-	data, err := readDecoderData(r)
+func newDecoder(r io.Reader, globals []byte, embedded bool, opts *DecodeOptions) (*Decoder, error) {
+	ctx, limits := normalizeDecodeOptions(opts)
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
+	if uint64(len(globals)) > limits.MaxInputBytes {
+		return nil, &LimitError{Resource: "global input bytes", Limit: limits.MaxInputBytes, Required: uint64(len(globals))}
+	}
+	data, err := readDecoderData(ctx, r, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +118,12 @@ func newDecoder(r io.Reader, globals []byte, embedded bool) (*Decoder, error) {
 	doc := NewDocument(data, globals, randomAccess, littleEndian)
 	doc.OrgMode = orgMode
 	doc.Grouped = grouped
+	doc.ctx = ctx
+	doc.budget = newDecodeBudget(limits)
+	if doc.globalContext != nil {
+		doc.globalContext.ctx = ctx
+		doc.globalContext.budget = doc.budget
+	}
 	if err := doc.parseGlobalSegments(); err != nil {
 		return nil, err
 	}
@@ -129,31 +160,37 @@ func (d *Document) parseGlobalSegments() error {
 		return nil
 	}
 	for {
+		if err := checkContext(d.ctx); err != nil {
+			return err
+		}
 		res := d.globalContext.DecodeSequential()
 		if res == ResultEndReached {
 			return nil
 		}
 		if res == ResultFailure {
+			if d.globalContext.err != nil {
+				return d.globalContext.err
+			}
 			return errors.New("failed to parse global segments")
 		}
 	}
 }
 
 // readDecoderData 读取解码数据
-// 入参: r 读取器
+// 入参: ctx 上下文, r 读取器, limits 资源限制
 // 返回: []byte 数据, error 错误信息
-func readDecoderData(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(r)
+func readDecoderData(ctx context.Context, r io.Reader, limits Limits) ([]byte, error) {
+	data, err := readAllLimited(ctx, r, limits.MaxInputBytes, "input bytes")
 	if err != nil {
 		return nil, err
 	}
-	return normalizeDecoderData(data)
+	return normalizeDecoderData(ctx, data, limits)
 }
 
 // normalizeDecoderData 解压CWS封装并定位其中的JBIG2数据，其他输入保持不变
-// 入参: data 数据
+// 入参: ctx 上下文, data 数据, limits 资源限制
 // 返回: []byte 数据, error 错误信息
-func normalizeDecoderData(data []byte) ([]byte, error) {
+func normalizeDecoderData(ctx context.Context, data []byte, limits Limits) ([]byte, error) {
 	if len(data) <= 8 || data[0] != 'C' || data[1] != 'W' || data[2] != 'S' {
 		return data, nil
 	}
@@ -162,7 +199,7 @@ func normalizeDecoderData(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer zr.Close()
-	decompressed, err := io.ReadAll(zr)
+	decompressed, err := readAllLimited(ctx, zr, limits.MaxDecompressedBytes, "decompressed bytes")
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +267,9 @@ func (d *Decoder) Decode() (image.Image, error) {
 		return nil, errors.New("decoder not initialized")
 	}
 	for {
+		if err := checkContext(d.doc.ctx); err != nil {
+			return nil, err
+		}
 		res := d.doc.DecodeSequential()
 		switch res {
 		case ResultEndReached:
@@ -242,15 +282,32 @@ func (d *Decoder) Decode() (image.Image, error) {
 				return nil, errors.New("page completed but no image found")
 			}
 		case ResultFailure:
+			if d.doc.err != nil {
+				return nil, d.doc.err
+			}
 			return nil, errors.New("decoding failed")
 		default:
 			continue
 		}
 		d.pageIndex++
-		img := d.doc.pageImage()
-		if !d.doc.Grouped {
-			d.doc.ReleasePageSegments(d.pageIndex)
+		if d.doc.colorPage == nil && d.doc.budget != nil {
+			outBytes, err := checkProduct("memory", uint64(d.doc.page.Width()), uint64(d.doc.page.Height()), d.doc.budget.limits.MaxMemoryBytes)
+			if err != nil {
+				return nil, err
+			}
+			if err := d.doc.budget.checkAddMemory(outBytes); err != nil {
+				return nil, err
+			}
 		}
+		img := d.doc.pageImage()
+		pageAssoc := d.doc.currentPageAssoc
+		if pageAssoc == 0 {
+			pageAssoc = d.pageIndex
+		}
+		d.doc.ReleasePageSegments(pageAssoc)
+		d.doc.page = nil
+		d.doc.colorPage = nil
+		_ = d.doc.setPageMemory(0)
 		return img, nil
 	}
 }
@@ -261,12 +318,29 @@ func (d *Decoder) Decode() (image.Image, error) {
 func (d *Decoder) DecodeAll() ([]image.Image, error) {
 	var images []image.Image
 	for {
+		if d.doc != nil {
+			if err := checkContext(d.doc.ctx); err != nil {
+				return images, err
+			}
+		}
 		img, err := d.Decode()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return images, err
+		}
+		if d.doc != nil && d.doc.budget != nil {
+			var pageBytes uint64
+			switch im := img.(type) {
+			case *image.Gray:
+				pageBytes = uint64(len(im.Pix))
+			case *image.NRGBA64:
+				pageBytes = uint64(len(im.Pix))
+			}
+			if err := d.doc.budget.reserveMemory(pageBytes); err != nil {
+				return images, err
+			}
 		}
 		images = append(images, img)
 	}
@@ -286,7 +360,16 @@ func (d *Decoder) GetDocument() *Document {
 // 入参: r 读取器
 // 返回: image.Image 图像, error 错误信息
 func Decode(r io.Reader) (image.Image, error) {
-	dec, err := NewDecoder(r)
+	return DecodeWithOptions(r, nil)
+}
+
+// DecodeWithOptions 按指定选项解码JBIG2数据包含的第一页
+// 黑白页面返回*image.Gray，彩色页面返回*image.NRGBA64，无页面时返回io.EOF
+// 在资源限制与上下文约束内读取r的全部数据，不关闭r
+// 入参: r 读取器, opts 解码选项，为nil时使用默认配置
+// 返回: image.Image 图像, error 错误信息
+func DecodeWithOptions(r io.Reader, opts *DecodeOptions) (image.Image, error) {
+	dec, err := NewDecoderWithOptions(r, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -299,32 +382,56 @@ func Decode(r io.Reader) (image.Image, error) {
 // 入参: r 读取器
 // 返回: image.Config 图像配置, error 错误信息
 func DecodeConfig(r io.Reader) (image.Config, error) {
-	dec, err := NewDecoder(r)
+	return DecodeConfigWithOptions(r, nil)
+}
+
+// DecodeConfigWithOptions 按指定选项获取JBIG2首页配置
+// 黑白页面使用color.GrayModel，彩色页面使用color.NRGBA64Model
+// 页面头未指定高度时使用已解析的页面高度，在资源限制与上下文约束内读取r且不关闭r
+// 入参: r 读取器, opts 解码选项，为nil时使用默认配置
+// 返回: image.Config 图像配置, error 错误信息
+func DecodeConfigWithOptions(r io.Reader, opts *DecodeOptions) (image.Config, error) {
+	dec, err := NewDecoderWithOptions(r, opts)
 	if err != nil {
 		return image.Config{}, err
 	}
+	buildConfig := func() image.Config {
+		info := dec.doc.pageInfoList[0]
+		height := info.Height
+		if height == 0xFFFFFFFF {
+			height = uint32(dec.doc.page.Height())
+		}
+		var model color.Model = color.GrayModel
+		if dec.doc.colorPage != nil {
+			model = color.NRGBA64Model
+		}
+		return image.Config{
+			ColorModel: model,
+			Width:      int(info.Width),
+			Height:     int(height),
+		}
+	}
 	for {
+		if err := checkContext(dec.doc.ctx); err != nil {
+			return image.Config{}, err
+		}
 		if len(dec.doc.pageInfoList) > 0 {
-			info := dec.doc.pageInfoList[0]
-			var model color.Model = color.GrayModel
-			if dec.doc.colorPage != nil {
-				model = color.NRGBA64Model
+			cfg := buildConfig()
+			if cfg.Height > 0 || !dec.doc.inPage {
+				return cfg, nil
 			}
-			height := info.Height
-			if height == 0xFFFFFFFF {
-				height = uint32(dec.doc.page.Height())
-			}
-			return image.Config{
-				ColorModel: model,
-				Width:      int(info.Width),
-				Height:     int(height),
-			}, nil
 		}
 		res := dec.doc.DecodeSequential()
-		if res == ResultEndReached && len(dec.doc.pageInfoList) == 0 {
+		if res == ResultEndReached {
+			if len(dec.doc.pageInfoList) > 0 {
+				return buildConfig(), nil
+			}
 			break
 		}
 		if res == ResultFailure {
+			if dec.doc.err != nil {
+				return image.Config{}, dec.doc.err
+			}
 			return image.Config{}, errors.New("decoding failed while looking for config")
 		}
 	}

@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -123,6 +124,8 @@ type MMRDecompressor struct {
 	width  int
 	height int
 	stream *BitStream
+	ctx    context.Context
+	budget *decodeBudget
 }
 
 // init 构建MMR模式及黑白游程的查找表
@@ -208,6 +211,15 @@ func (m *MMRDecompressor) getNextCodeWord() (int, error) {
 // Uncompress 按MMR游程解码二值图像
 // 返回: *Image 图像, error 错误信息
 func (m *MMRDecompressor) Uncompress() (*Image, error) {
+	if err := checkContext(m.ctx); err != nil {
+		return nil, err
+	}
+	if m.width <= 0 || m.height <= 0 {
+		return nil, errors.New("failed to create image")
+	}
+	if _, err := m.budget.checkImage(int32(m.width), int32(m.height), false); err != nil {
+		return nil, err
+	}
 	img := NewImage(int32(m.width), int32(m.height))
 	if img == nil {
 		return nil, errors.New("failed to create image")
@@ -217,6 +229,11 @@ func (m *MMRDecompressor) Uncompress() (*Image, error) {
 	refOffsets[0] = m.width
 	refRunLength := 1
 	for y := 0; y < m.height; y++ {
+		if y&63 == 0 {
+			if err := checkContext(m.ctx); err != nil {
+				return nil, err
+			}
+		}
 		count, err := m.uncompress2D(refOffsets, refRunLength, currOffsets)
 		if err != nil {
 			return nil, err
@@ -256,7 +273,13 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		switch code.runLength {
 		case mmrPass:
 			refIdx++
+			if refIdx >= len(refOffsets) {
+				return 0, errors.New("mmr pass out of bounds")
+			}
 			bitPos = refOffsets[refIdx]
+			if bitPos > m.width {
+				return 0, errors.New("mmr pass out of bounds")
+			}
 			refIdx++
 			continue
 		case mmrHoriz:
@@ -299,24 +322,29 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 			if bitPos <= start {
 				return 0, errors.New("mmr run does not advance")
 			}
-			for bitPos < m.width && refOffsets[refIdx] <= bitPos {
+			for bitPos < m.width && refIdx+2 < len(refOffsets) && refOffsets[refIdx] <= bitPos {
 				refIdx += 2
 			}
 			continue
-		case mmrV0:
+		case mmrV0, mmrVR1, mmrVR2, mmrVR3, mmrVL1, mmrVL2, mmrVL3:
+			if refIdx >= len(refOffsets) {
+				return 0, errors.New("mmr offset out of bounds")
+			}
 			bitPos = refOffsets[refIdx]
-		case mmrVR1:
-			bitPos = refOffsets[refIdx] + 1
-		case mmrVR2:
-			bitPos = refOffsets[refIdx] + 2
-		case mmrVR3:
-			bitPos = refOffsets[refIdx] + 3
-		case mmrVL1:
-			bitPos = refOffsets[refIdx] - 1
-		case mmrVL2:
-			bitPos = refOffsets[refIdx] - 2
-		case mmrVL3:
-			bitPos = refOffsets[refIdx] - 3
+			switch code.runLength {
+			case mmrVR1:
+				bitPos++
+			case mmrVR2:
+				bitPos += 2
+			case mmrVR3:
+				bitPos += 3
+			case mmrVL1:
+				bitPos--
+			case mmrVL2:
+				bitPos -= 2
+			case mmrVL3:
+				bitPos -= 3
+			}
 		default:
 			return 0, errors.New("unsupported mmr mode")
 		}
@@ -332,11 +360,14 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		} else {
 			refIdx++
 		}
-		for bitPos < m.width && refOffsets[refIdx] <= bitPos {
+		for bitPos < m.width && refIdx+2 < len(refOffsets) && refOffsets[refIdx] <= bitPos {
 			refIdx += 2
 		}
 	}
 	if currIdx == 0 || currOffsets[currIdx-1] != m.width {
+		if currIdx >= m.width+1 {
+			return 0, errors.New("mmr run exceeds width")
+		}
 		currOffsets[currIdx] = m.width
 		currIdx++
 	}

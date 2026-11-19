@@ -15,6 +15,8 @@
 package jbig2
 
 import (
+	"context"
+	"errors"
 	"image"
 	"image/color"
 )
@@ -37,23 +39,30 @@ type Result int
 
 // Document 文档上下文
 type Document struct {
-	stream          *BitStream
-	globalContext   *Document
-	segmentList     []*Segment
-	page            *Image
-	colorPage       *image.NRGBA64
-	referenceColors bool
-	pageInfoList    []*PageInfo
-	segment         *Segment
-	offset          uint32
-	groupedOffset   uint32
-	groupedIndex    int
-	groupedParsed   bool
-	inPage          bool
-	pageWritten     bool
-	randomAccess    bool
-	Grouped         bool
-	OrgMode         int
+	stream           *BitStream
+	globalContext    *Document
+	segmentList      []*Segment
+	segmentIndex     map[uint32]*Segment
+	groupedLastRef   map[uint32]int
+	page             *Image
+	colorPage        *image.NRGBA64
+	referenceColors  bool
+	pageInfoList     []*PageInfo
+	segment          *Segment
+	offset           uint32
+	groupedOffset    uint32
+	groupedIndex     int
+	groupedParsed    bool
+	inPage           bool
+	pageWritten      bool
+	randomAccess     bool
+	Grouped          bool
+	OrgMode          int
+	ctx              context.Context
+	budget           *decodeBudget
+	err              error
+	pageMemBytes     uint64
+	currentPageAssoc uint32
 }
 
 // PageInfo 页面信息段中的元数据
@@ -107,16 +116,166 @@ func NewDocument(data []byte, globalData []byte, randomAccess bool, littleEndian
 	stream.SetLittleEndian(littleEndian)
 	doc := &Document{
 		stream:       stream,
+		segmentIndex: make(map[uint32]*Segment),
 		randomAccess: randomAccess,
 	}
 	if len(globalData) > 0 {
 		globalStream := NewBitStream(globalData, 0)
 		globalStream.SetLittleEndian(littleEndian)
 		doc.globalContext = &Document{
-			stream: globalStream,
+			stream:       globalStream,
+			segmentIndex: make(map[uint32]*Segment),
 		}
 	}
 	return doc
+}
+
+// fail 记录结构化错误并返回失败状态
+// 入参: err 错误信息
+// 返回: Result 失败状态
+func (d *Document) fail(err error) Result {
+	if d.err == nil && err != nil {
+		d.err = err
+	}
+	return ResultFailure
+}
+
+// setPageMemory 更新当前页面在预算中的内存占用
+// 入参: newBytes 新字节数
+// 返回: error 错误信息
+func (d *Document) setPageMemory(newBytes uint64) error {
+	if d.budget == nil {
+		d.pageMemBytes = newBytes
+		return nil
+	}
+	if newBytes > d.pageMemBytes {
+		if err := d.budget.reserveMemory(newBytes - d.pageMemBytes); err != nil {
+			return err
+		}
+	} else if d.pageMemBytes > newBytes {
+		d.budget.releaseMemory(d.pageMemBytes - newBytes)
+	}
+	d.pageMemBytes = newBytes
+	return nil
+}
+
+// resizePageMemory 校验页面尺寸并更新当前页面内存预算
+// 入参: width 宽度, height 高度, colorPage 是否包含彩色页面
+// 返回: error 错误信息
+func (d *Document) resizePageMemory(width, height int32, colorPage bool) error {
+	totalBytes, err := d.budget.pageBytes(width, height, colorPage)
+	if err != nil {
+		return err
+	}
+	return d.setPageMemory(totalBytes)
+}
+
+// estimateSegmentMemory 估算段长期保留的数据内存字节数
+// 入参: seg 段
+// 返回: uint64 字节数
+func estimateSegmentMemory(seg *Segment) uint64 {
+	var total uint64
+	if seg.Image != nil {
+		total += uint64(len(seg.Image.data))
+	}
+	if seg.colorImage != nil {
+		total += uint64(len(seg.colorImage.Pix))
+	}
+	if seg.SymbolDict != nil {
+		for _, img := range seg.SymbolDict.Images {
+			if img != nil {
+				total += uint64(len(img.data))
+			}
+		}
+	}
+	if seg.PatternDict != nil {
+		for _, img := range seg.PatternDict.HDPATS {
+			if img != nil {
+				total += uint64(len(img.data))
+			}
+		}
+	}
+	total += uint64(len(seg.ColorPalette)) * 8
+	total += uint64(len(seg.GBContexts)) + uint64(len(seg.GRContexts))
+	return total
+}
+
+// chargeSegmentMemory 将段保留数据计入内存预算
+// 入参: seg 段
+// 返回: error 错误信息
+func (d *Document) chargeSegmentMemory(seg *Segment) error {
+	mem := estimateSegmentMemory(seg)
+	if mem == seg.memBytes {
+		return nil
+	}
+	if d.budget != nil {
+		if mem > seg.memBytes {
+			if err := d.budget.reserveMemory(mem - seg.memBytes); err != nil {
+				return err
+			}
+		} else {
+			d.budget.releaseMemory(seg.memBytes - mem)
+		}
+	}
+	seg.memBytes = mem
+	return nil
+}
+
+// releaseSegmentData 清空段内解码数据并归还内存预算
+// 入参: seg 段
+func (d *Document) releaseSegmentData(seg *Segment) {
+	if seg == nil || seg.released {
+		return
+	}
+	seg.Image = nil
+	seg.colorImage = nil
+	seg.ColorPalette = nil
+	seg.PatternDict = nil
+	seg.SymbolDict = nil
+	seg.HuffmanTable = nil
+	seg.GBContexts = nil
+	seg.GRContexts = nil
+	seg.released = true
+	if d.budget != nil && seg.memBytes > 0 {
+		d.budget.releaseMemory(seg.memBytes)
+	}
+	seg.memBytes = 0
+}
+
+// addSegment 追加段并维护按编号查找索引
+// 入参: seg 段
+func (d *Document) addSegment(seg *Segment) {
+	d.segmentList = append(d.segmentList, seg)
+	if d.segmentIndex == nil {
+		d.segmentIndex = make(map[uint32]*Segment)
+	}
+	if _, exists := d.segmentIndex[seg.Number]; !exists {
+		d.segmentIndex[seg.Number] = seg
+	}
+}
+
+// releaseDeferredNonRetained 按保留标志释放不再被引用的延迟释放段
+// 入参: seg 当前段, currentIndex 分组模式下的段索引，顺序模式为-1
+func (d *Document) releaseDeferredNonRetained(seg *Segment, currentIndex int) {
+	if seg == nil || len(seg.retainBits) == 0 || d.segmentIndex == nil {
+		return
+	}
+	for i, refNum := range seg.ReferredToSegmentNumbers {
+		if i >= len(seg.retainBits) || seg.retainBits[i] {
+			continue
+		}
+		refSeg := d.segmentIndex[refNum]
+		if refSeg == nil || !refSeg.Flags.DeferredNonRetain || refSeg.released {
+			continue
+		}
+		if currentIndex >= 0 && d.groupedLastRef != nil {
+			if lastIdx, ok := d.groupedLastRef[refNum]; ok && currentIndex < lastIdx {
+				continue
+			}
+		}
+		d.releaseSegmentData(refSeg)
+		delete(d.segmentIndex, refNum)
+	}
 }
 
 // ParseSegmentHeader 解析段头
@@ -152,7 +311,24 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 		}
 		retentionBits := segment.ReferredToSegmentCount + 1
 		bytesToSkip := (retentionBits + 7) / 8
-		d.stream.AddOffset(uint32(bytesToSkip))
+		if uint32(bytesToSkip) > d.stream.GetByteLeft() {
+			return ResultFailure
+		}
+		retainBytes := make([]byte, bytesToSkip)
+		for i := int32(0); i < bytesToSkip; i++ {
+			val, err := d.stream.Read1Byte()
+			if err != nil {
+				return ResultFailure
+			}
+			retainBytes[i] = val
+		}
+		if segment.ReferredToSegmentCount > 0 {
+			segment.retainBits = make([]bool, segment.ReferredToSegmentCount)
+			for i := int32(0); i < segment.ReferredToSegmentCount; i++ {
+				bitIdx := i + 1
+				segment.retainBits[i] = (retainBytes[bitIdx/8] & (1 << uint(bitIdx%8))) != 0
+			}
+		}
 	} else {
 		if val, err := d.stream.Read1Byte(); err != nil {
 			return ResultFailure
@@ -160,6 +336,12 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 			cTemp = val
 		}
 		segment.ReferredToSegmentCount = int32(cTemp >> 5)
+		if segment.ReferredToSegmentCount > 0 && segment.ReferredToSegmentCount <= 4 {
+			segment.retainBits = make([]bool, segment.ReferredToSegmentCount)
+			for i := int32(0); i < segment.ReferredToSegmentCount; i++ {
+				segment.retainBits[i] = (cTemp & (1 << uint(i+1))) != 0
+			}
+		}
 	}
 	cSSize := 1
 	if segment.Number > 65536 {
@@ -233,18 +415,19 @@ func (d *Document) FindSegmentByNumber(number uint32) *Segment {
 			return seg
 		}
 	}
-	for _, seg := range d.segmentList {
-		if seg.Number == number {
-			return seg
-		}
-	}
-	return nil
+	return d.segmentIndex[number]
 }
 
 // ParseSegmentData 解析段数据
 // 入参: segment 段
 // 返回: Result 解析状态
 func (d *Document) ParseSegmentData(segment *Segment) Result {
+	if err := checkContext(d.ctx); err != nil {
+		return d.fail(err)
+	}
+	if err := d.budget.checkSegmentLength(segment.DataLength); err != nil {
+		return d.fail(err)
+	}
 	if segment.DataLength != 0xFFFFFFFF && segment.DataLength > d.stream.GetByteLeft() {
 		return ResultFailure
 	}
@@ -253,57 +436,69 @@ func (d *Document) ParseSegmentData(segment *Segment) Result {
 		d.stream.data = data[:d.stream.GetOffset()+segment.DataLength]
 		defer func() { d.stream.data = data }()
 	}
+	var ret Result
 	switch segment.Flags.Type {
 	case 0:
-		return d.parseSymbolDict(segment)
+		ret = d.parseSymbolDict(segment)
 	case 4, 6, 7:
 		if !d.inPage {
 			return ResultFailure
 		}
-		return d.parseTextRegion(segment)
+		ret = d.parseTextRegion(segment)
 	case 16:
-		return d.parsePatternDict(segment)
+		ret = d.parsePatternDict(segment)
 	case 20, 22, 23:
 		if !d.inPage {
 			return ResultFailure
 		}
-		return d.parseHalftoneRegion(segment)
+		ret = d.parseHalftoneRegion(segment)
 	case 36, 38, 39:
 		if !d.inPage {
 			return ResultFailure
 		}
-		return d.parseGenericRegion(segment)
+		ret = d.parseGenericRegion(segment)
 	case 40, 42, 43:
 		if !d.inPage {
 			return ResultFailure
 		}
-		return d.parseGenericRefinementRegion(segment)
+		ret = d.parseGenericRefinementRegion(segment)
 	case 48:
-		return d.parsePageInfo(segment)
+		ret = d.parsePageInfo(segment)
 	case 49:
 		d.inPage = false
 		return ResultPageCompleted
 	case 50:
-		return d.parseEndOfStripe()
+		ret = d.parseEndOfStripe()
 	case 51:
 		return ResultEndReached
 	case 52:
 		d.stream.AddOffset(segment.DataLength)
+		ret = ResultSuccess
 	case 53:
-		return d.parseTable(segment)
+		ret = d.parseTable(segment)
 	case 54:
-		return d.parseColorPalette(segment)
+		ret = d.parseColorPalette(segment)
 	case 62:
 		d.stream.AddOffset(segment.DataLength)
+		ret = ResultSuccess
 	default:
 		d.stream.AddOffset(segment.DataLength)
+		ret = ResultSuccess
 	}
-	return ResultSuccess
+	if ret == ResultSuccess {
+		if err := d.chargeSegmentMemory(segment); err != nil {
+			return d.fail(err)
+		}
+	}
+	return ret
 }
 
 // DecodeSequential 按顺序解析段，直到当前页完成或遇到错误
 // 返回: Result 解析状态
 func (d *Document) DecodeSequential() Result {
+	if err := checkContext(d.ctx); err != nil {
+		return d.fail(err)
+	}
 	if d.stream.GetByteLeft() <= 0 {
 		return ResultEndReached
 	}
@@ -311,6 +506,9 @@ func (d *Document) DecodeSequential() Result {
 		return d.decodeGrouped()
 	}
 	for d.stream.GetByteLeft() > 0 {
+		if err := checkContext(d.ctx); err != nil {
+			return d.fail(err)
+		}
 		if d.segment == nil {
 			d.segment = NewSegment()
 			ret := d.ParseSegmentHeader(d.segment)
@@ -322,7 +520,7 @@ func (d *Document) DecodeSequential() Result {
 		}
 		ret := d.ParseSegmentData(d.segment)
 		if ret == ResultEndReached || ret == ResultPageCompleted {
-			d.segmentList = append(d.segmentList, d.segment)
+			d.addSegment(d.segment)
 			d.segment = nil
 			return ret
 		}
@@ -335,7 +533,9 @@ func (d *Document) DecodeSequential() Result {
 		} else {
 			d.stream.AddOffset(4)
 		}
-		d.segmentList = append(d.segmentList, d.segment)
+		seg := d.segment
+		d.addSegment(seg)
+		d.releaseDeferredNonRetained(seg, -1)
 		d.segment = nil
 	}
 	return ResultSuccess
@@ -345,13 +545,23 @@ func (d *Document) DecodeSequential() Result {
 // 返回: Result 解析状态
 func (d *Document) decodeGrouped() Result {
 	if !d.groupedParsed {
+		d.groupedLastRef = make(map[uint32]int)
 		for d.stream.GetByteLeft() > 0 {
+			if len(d.segmentList)&63 == 0 {
+				if err := checkContext(d.ctx); err != nil {
+					return d.fail(err)
+				}
+			}
 			seg := NewSegment()
 			ret := d.ParseSegmentHeader(seg)
 			if ret != ResultSuccess {
 				return ret
 			}
-			d.segmentList = append(d.segmentList, seg)
+			idx := len(d.segmentList)
+			d.addSegment(seg)
+			for _, refNum := range seg.ReferredToSegmentNumbers {
+				d.groupedLastRef[refNum] = idx
+			}
 			if seg.Flags.Type == 51 {
 				break
 			}
@@ -360,6 +570,9 @@ func (d *Document) decodeGrouped() Result {
 		d.groupedParsed = true
 	}
 	for d.groupedIndex < len(d.segmentList) {
+		if err := checkContext(d.ctx); err != nil {
+			return d.fail(err)
+		}
 		seg := d.segmentList[d.groupedIndex]
 		if seg.Flags.Type == 51 {
 			d.groupedIndex++
@@ -379,7 +592,11 @@ func (d *Document) decodeGrouped() Result {
 		if seg.DataLength != 0xFFFFFFFF {
 			d.groupedOffset += seg.DataLength
 			d.stream.SetOffset(d.groupedOffset)
+		} else {
+			d.stream.AddOffset(4)
+			d.groupedOffset = d.stream.GetOffset()
 		}
+		d.releaseDeferredNonRetained(seg, d.groupedIndex)
 		d.segment = nil
 		d.groupedIndex++
 		if ret == ResultPageCompleted || ret == ResultEndReached {
@@ -565,6 +782,8 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	if grContexts == nil {
 		grContexts = make([]ArithCtx, grContextSize)
 	}
+	sdd.ctx = d.ctx
+	sdd.budget = d.budget
 	var err error
 	if sdd.SDHUFF {
 		segment.SymbolDict, err = sdd.DecodeHuffman(d.stream, gbContexts, grContexts)
@@ -576,7 +795,7 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 		d.stream.AddOffset(2)
 	}
 	if err != nil {
-		return ResultFailure
+		return d.fail(err)
 	}
 	if (flags & 0x0200) != 0 {
 		segment.GBContexts = gbContexts
@@ -655,7 +874,7 @@ func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo,
 		return false
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
-	if pi.IsStriped || pi.DefaultPixelValue != trd.SBDEFPIXEL ||
+	if pi.IsStriped || pi.Height == 0xFFFFFFFF || pi.DefaultPixelValue != trd.SBDEFPIXEL ||
 		ri.X != 0 || ri.Y != 0 || ri.Width != d.page.Width() || ri.Height != d.page.Height() {
 		return false
 	}
@@ -671,19 +890,39 @@ func (d *Document) canDecodeTextRegionIntoPage(segment *Segment, ri *RegionInfo,
 
 // expandPageForRegion 根据区域扩展页面
 // 入参: ri 区域信息
-func (d *Document) expandPageForRegion(ri *RegionInfo) {
+// 返回: error 错误信息
+func (d *Document) expandPageForRegion(ri *RegionInfo) error {
 	if d.page == nil || len(d.pageInfoList) == 0 {
-		return
+		return nil
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
-	if !pi.IsStriped || pi.Height != 0xFFFFFFFF {
-		return
+	if pi.Height != 0xFFFFFFFF {
+		return nil
 	}
 	newHeight := int64(ri.Y) + int64(ri.Height)
-	if newHeight <= int64(d.page.Height()) || newHeight > int64(1<<31-1) {
-		return
+	if newHeight <= int64(d.page.Height()) {
+		return nil
 	}
-	d.page.Expand(int32(newHeight), pi.DefaultPixelValue)
+	if newHeight > int64(1<<31-1) {
+		return errors.New("expanded page height overflow")
+	}
+	h32 := int32(newHeight)
+	if err := d.resizePageMemory(d.page.Width(), h32, d.colorPage != nil); err != nil {
+		return err
+	}
+	d.page.Expand(h32, pi.DefaultPixelValue)
+	if d.page.Height() < h32 {
+		return errors.New("failed to expand page")
+	}
+	if d.colorPage != nil && int(h32) > d.colorPage.Rect.Dy() {
+		grown := newColorImage(d.page.Width(), h32)
+		if grown == nil {
+			return errors.New("failed to expand color page")
+		}
+		copy(grown.Pix, d.colorPage.Pix)
+		d.colorPage = grown
+	}
+	return nil
 }
 
 // GetHuffmanTable 创建标准霍夫曼表
@@ -781,10 +1020,11 @@ func (d *Document) decodeSymbolIDHuffmanTable(SBNUMSYMS uint32, includeRunCode b
 func (d *Document) parseTextRegion(segment *Segment) Result {
 	start := *d.stream
 	result := d.parseTextRegionData(segment, false)
-	if result != ResultFailure || start.GetByteLeft() < 19 ||
+	if result != ResultFailure || checkContext(d.ctx) != nil || errors.Is(d.err, ErrLimitExceeded) || start.GetByteLeft() < 19 ||
 		readUint16(start.data[start.GetOffset()+17:], start.littleEndian)&1 == 0 {
 		return result
 	}
+	d.err = nil
 	*d.stream = start
 	return d.parseTextRegionData(segment, true)
 }
@@ -812,6 +1052,8 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 		flags = val
 	}
 	pTRD := NewTRDProc()
+	pTRD.ctx = d.ctx
+	pTRD.budget = d.budget
 	pTRD.implicitRefinement = implicit
 	pTRD.SBW = uint32(ri.Width)
 	pTRD.SBH = uint32(ri.Height)
@@ -870,6 +1112,9 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 		pTRD.colorRuns, referenceColors, err = decodeColorRuns(stream, pTRD.SBNUMINSTANCES, palette, implicit)
 		if err != nil {
 			return ResultFailure
+		}
+		if _, err := d.budget.checkImage(ri.Width, ri.Height, true); err != nil {
+			return d.fail(err)
 		}
 		pTRD.colorImage = newColorImage(ri.Width, ri.Height)
 		if pTRD.colorImage == nil {
@@ -1059,13 +1304,15 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 		}
 	}
 	if err != nil || segment.Image == nil {
-		return ResultFailure
+		return d.fail(err)
 	}
 	segment.colorImage = pTRD.colorImage
 	d.referenceColors = d.referenceColors || referenceColors
 	if segment.Flags.Type != 4 {
 		if !directToPage {
-			d.expandPageForRegion(&ri)
+			if err := d.expandPageForRegion(&ri); err != nil {
+				return d.fail(err)
+			}
 			if d.colorPage == nil {
 				d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 			} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
@@ -1085,6 +1332,8 @@ func (d *Document) parseTextRegionData(segment *Segment, includeRunCode bool) Re
 func (d *Document) parsePatternDict(segment *Segment) Result {
 	var flags byte
 	pPDD := NewPDDProc()
+	pPDD.ctx = d.ctx
+	pPDD.budget = d.budget
 	if val, err := d.stream.Read1Byte(); err != nil {
 		return ResultFailure
 	} else {
@@ -1115,7 +1364,7 @@ func (d *Document) parsePatternDict(segment *Segment) Result {
 	if pPDD.HDMMR {
 		segment.PatternDict, err = pPDD.DecodeMMR(d.stream)
 		if err != nil {
-			return ResultFailure
+			return d.fail(err)
 		}
 		d.stream.AlignByte()
 	} else {
@@ -1129,7 +1378,7 @@ func (d *Document) parsePatternDict(segment *Segment) Result {
 		arithDecoder := NewArithDecoder(d.stream)
 		segment.PatternDict, err = pPDD.DecodeArith(arithDecoder, gbContexts)
 		if err != nil {
-			return ResultFailure
+			return d.fail(err)
 		}
 		d.stream.AlignByte()
 		d.stream.AddOffset(2)
@@ -1144,6 +1393,8 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 	var ri RegionInfo
 	var flags byte
 	pHRD := NewHTRDProc()
+	pHRD.ctx = d.ctx
+	pHRD.budget = d.budget
 	if d.ParseRegionInfo(&ri) != ResultSuccess {
 		return ResultFailure
 	}
@@ -1213,7 +1464,7 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 		d.stream.AlignByte()
 		segment.Image, err = pHRD.DecodeMMR(d.stream)
 		if err != nil {
-			return ResultFailure
+			return d.fail(err)
 		}
 		d.stream.AlignByte()
 	} else {
@@ -1222,13 +1473,15 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 		arithDecoder := NewArithDecoder(d.stream)
 		segment.Image, err = pHRD.DecodeArith(arithDecoder, gbContexts)
 		if err != nil {
-			return ResultFailure
+			return d.fail(err)
 		}
 		d.stream.AlignByte()
 		d.stream.AddOffset(2)
 	}
 	if segment.Flags.Type != 20 {
-		d.expandPageForRegion(&ri)
+		if err := d.expandPageForRegion(&ri); err != nil {
+			return d.fail(err)
+		}
 		if d.colorPage == nil {
 			d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		} else if d.composeColorRegion(segment, &ri) != ResultSuccess {
@@ -1248,7 +1501,7 @@ func (d *Document) canDecodeGenericRegionIntoPage(segment *Segment, ri *RegionIn
 		return false
 	}
 	pi := d.pageInfoList[len(d.pageInfoList)-1]
-	if pi.IsStriped || pi.DefaultPixelValue || ri.X != 0 || ri.Y != 0 || ri.Width != d.page.Width() || ri.Height != d.page.Height() {
+	if pi.IsStriped || pi.Height == 0xFFFFFFFF || pi.DefaultPixelValue || ri.X != 0 || ri.Y != 0 || ri.Width != d.page.Width() || ri.Height != d.page.Height() {
 		return false
 	}
 	op := composeOpFromRegionFlags(ri.Flags)
@@ -1288,6 +1541,8 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		flags = val
 	}
 	pGRD := NewGRDProc()
+	pGRD.ctx = d.ctx
+	pGRD.budget = d.budget
 	pGRD.GBW = uint32(ri.Width)
 	pGRD.GBH = uint32(ri.Height)
 	pGRD.MMR = (flags & 0x01) != 0
@@ -1326,18 +1581,36 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 	segment.ResultType = JBig2ImagePointer
 	direct := d.canDecodeGenericRegionIntoPage(segment, &ri)
 	if pGRD.MMR {
-		if direct {
+		if segment.DataLength == 0xFFFFFFFF {
+			if pGRD.GBW > JBig2MaxImageSize || pGRD.GBH > JBig2MaxImageSize {
+				return ResultFailure
+			}
+			mmrDec := NewMMRDecompressor(int(pGRD.GBW), int(pGRD.GBH), d.stream)
+			mmrDec.ctx = d.ctx
+			mmrDec.budget = d.budget
+			img, err := mmrDec.Uncompress()
+			if err != nil {
+				return d.fail(err)
+			}
+			if direct {
+				copy(d.page.Data(), img.Data())
+				segment.Image = d.page
+			} else {
+				segment.Image = img
+				pGRD.replaceRect = Rect{0, 0, img.Width(), img.Height()}
+			}
+		} else if direct {
 			if pGRD.GBW > JBig2MaxImageSize || pGRD.GBH > JBig2MaxImageSize {
 				return ResultFailure
 			}
 			segment.Image = d.page
-			if err := DecodeG4(d.stream, segment.Image); err != nil {
-				return ResultFailure
+			if err := decodeG4Context(d.ctx, d.stream, segment.Image); err != nil {
+				return d.fail(err)
 			}
 		} else {
 			res := pGRD.StartDecodeMMR(&segment.Image, d.stream)
 			if res != JBig2SegmentParseComplete {
-				return ResultFailure
+				return d.fail(pGRD.err)
 			}
 		}
 		d.stream.AlignByte()
@@ -1351,12 +1624,19 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		}
 		segment.Image, err = pGRD.decodeArithInto(arithDecoder, gbContexts, segment.Image)
 		if err != nil {
-			return ResultFailure
+			return d.fail(err)
 		}
-		d.stream.AlignByte()
-		d.stream.AddOffset(2)
+		if segment.DataLength == 0xFFFFFFFF {
+			advancePastArithTerminator(d.stream)
+		} else {
+			d.stream.AlignByte()
+			d.stream.AddOffset(2)
+		}
 	}
 	if ri.Flags&0x08 != 0 {
+		if _, err := d.budget.checkImage(ri.Width, ri.Height, true); err != nil {
+			return d.fail(err)
+		}
 		segment.colorImage = newColorImage(ri.Width, ri.Height)
 		if segment.colorImage == nil {
 			return ResultFailure
@@ -1364,7 +1644,9 @@ func (d *Document) parseGenericRegion(segment *Segment) Result {
 		paintColorMask(segment.colorImage, segment.Image, 0, 0, foreground)
 	}
 	if segment.Flags.Type != 36 {
-		d.expandPageForRegion(&ri)
+		if err := d.expandPageForRegion(&ri); err != nil {
+			return d.fail(err)
+		}
 		if d.colorPage == nil && !direct {
 			rect := pGRD.GetReplaceRect()
 			d.page.ComposeFrom(ri.X+rect.Left, ri.Y+rect.Top, segment.Image, composeOpFromRegionFlags(ri.Flags))
@@ -1409,6 +1691,8 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 		flags = val
 	}
 	pGRRD := NewGRRDProc()
+	pGRRD.ctx = d.ctx
+	pGRRD.budget = d.budget
 	pGRRD.GRW = uint32(ri.Width)
 	pGRRD.GRH = uint32(ri.Height)
 	pGRRD.GRTEMPLATE = (flags & 0x01) != 0
@@ -1455,12 +1739,14 @@ func (d *Document) parseGenericRefinementRegion(segment *Segment) Result {
 	var err error
 	segment.Image, err = pGRRD.Decode(arithDecoder, grContexts)
 	if err != nil {
-		return ResultFailure
+		return d.fail(err)
 	}
 	d.stream.AlignByte()
 	d.stream.AddOffset(2)
 	if segment.Flags.Type != 40 {
-		d.expandPageForRegion(&ri)
+		if err := d.expandPageForRegion(&ri); err != nil {
+			return d.fail(err)
+		}
 		d.page.ComposeFrom(ri.X, ri.Y, segment.Image, composeOpFromRegionFlags(ri.Flags))
 		segment.Image = nil
 		d.pageWritten = true
@@ -1508,26 +1794,53 @@ func (d *Document) parsePageInfo(segment *Segment) Result {
 	pi.DefaultPixelValue = (flags&4) != 0 && (flags&0x80) == 0
 	pi.IsStriped = (striping & 0x8000) != 0
 	pi.MaxStripeSize = striping & 0x7FFF
+	if pi.Width == 0 || pi.Width > 0x7FFFFFFF {
+		return ResultFailure
+	}
+	_ = d.setPageMemory(0)
 	height := pi.Height
 	if height == 0xFFFFFFFF {
 		height = uint32(pi.MaxStripeSize)
-	}
-	d.page = NewImage(int32(pi.Width), int32(height))
-	if d.page == nil {
+	} else if height == 0 || height > 0x7FFFFFFF {
 		return ResultFailure
 	}
-	d.colorPage = nil
-	d.referenceColors = false
-	if flags&0x80 != 0 {
-		d.colorPage = newColorImage(int32(pi.Width), int32(height))
-		if d.colorPage == nil {
+	if height == 0 {
+		w := int32(pi.Width)
+		d.page = &Image{
+			width:  w,
+			height: 0,
+			stride: (w + 7) / 8,
+		}
+		d.colorPage = nil
+		d.referenceColors = false
+		if flags&0x80 != 0 {
+			d.colorPage = newZeroHeightColorImage(w)
+			if d.colorPage == nil {
+				return ResultFailure
+			}
+		}
+	} else {
+		if err := d.resizePageMemory(int32(pi.Width), int32(height), flags&0x80 != 0); err != nil {
+			return d.fail(err)
+		}
+		d.page = NewImage(int32(pi.Width), int32(height))
+		if d.page == nil {
 			return ResultFailure
 		}
-	}
-	if pi.DefaultPixelValue {
-		d.page.Fill(true)
+		d.colorPage = nil
+		d.referenceColors = false
+		if flags&0x80 != 0 {
+			d.colorPage = newColorImage(int32(pi.Width), int32(height))
+			if d.colorPage == nil {
+				return ResultFailure
+			}
+		}
+		if pi.DefaultPixelValue {
+			d.page.Fill(true)
+		}
 	}
 	d.pageInfoList = append(d.pageInfoList, pi)
+	d.currentPageAssoc = segment.PageAssociation
 	d.inPage = true
 	d.pageWritten = false
 	return ResultSuccess
@@ -1548,6 +1861,9 @@ func (d *Document) parseEndOfStripe() Result {
 		return ResultSuccess
 	}
 	height := int32(line + 1)
+	if err := d.resizePageMemory(d.page.Width(), height, d.colorPage != nil); err != nil {
+		return d.fail(err)
+	}
 	d.page.Expand(height, pi.DefaultPixelValue)
 	if d.page.Height() < height {
 		return ResultFailure
@@ -1588,18 +1904,34 @@ func (d *Document) parseTable(segment *Segment) Result {
 // 移除指定页面的段并清空段中的解码结果，已取得的段引用也会受影响
 // 入参: pageNumber 页面编号
 func (d *Document) ReleasePageSegments(pageNumber uint32) {
+	if d.Grouped {
+		for idx := 0; idx < d.groupedIndex && idx < len(d.segmentList); idx++ {
+			seg := d.segmentList[idx]
+			if seg == nil || seg.released || seg.PageAssociation == 0 || seg.PageAssociation != pageNumber {
+				continue
+			}
+			if d.groupedLastRef != nil {
+				if lastIdx, ok := d.groupedLastRef[seg.Number]; ok && d.groupedIndex-1 < lastIdx {
+					continue
+				}
+			}
+			d.releaseSegmentData(seg)
+			if d.segmentIndex != nil && d.segmentIndex[seg.Number] == seg {
+				delete(d.segmentIndex, seg.Number)
+			}
+		}
+		return
+	}
 	n := 0
 	for _, seg := range d.segmentList {
-		if seg.PageAssociation != pageNumber {
+		if seg.PageAssociation != pageNumber || (pageNumber != 0 && seg.Flags.DeferredNonRetain) {
 			d.segmentList[n] = seg
 			n++
 		} else {
-			seg.Image = nil
-			seg.colorImage = nil
-			seg.ColorPalette = nil
-			seg.PatternDict = nil
-			seg.SymbolDict = nil
-			seg.HuffmanTable = nil
+			d.releaseSegmentData(seg)
+			if d.segmentIndex != nil && d.segmentIndex[seg.Number] == seg {
+				delete(d.segmentIndex, seg.Number)
+			}
 		}
 	}
 	for i := n; i < len(d.segmentList); i++ {

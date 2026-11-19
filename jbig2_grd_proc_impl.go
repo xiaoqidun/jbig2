@@ -31,6 +31,12 @@ func (g *GRDProc) decodeTemplate0Opt3(state *ProgressiveArithDecodeState) JBig2S
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {
@@ -115,6 +121,12 @@ func (g *GRDProc) decodeTemplate0Extended(state *ProgressiveArithDecodeState) JB
 	copy(at[8:], g.GBATEXT[:])
 	shifts := [12]uint{1, 13, 9, 14, 12, 5, 2, 3, 11, 4, 15, 10}
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {
@@ -204,6 +216,12 @@ func (g *GRDProc) decodeTemplateOpt(state *ProgressiveArithDecodeState, opt int)
 	}
 	contextMask := (line3Mask &^ 1) | line2Mask<<(shift+1) | (line1Mask&^1)<<shiftC9
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {
@@ -267,6 +285,12 @@ func (g *GRDProc) decodeTemplate3Opt(state *ProgressiveArithDecodeState) JBig2Se
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {
@@ -314,6 +338,12 @@ func (g *GRDProc) decodeTemplateUnopt(state *ProgressiveArithDecodeState, opt in
 	shift := uint(4 - opt)
 	shiftC9 := kOptConstant9[opt]
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {
@@ -380,6 +410,12 @@ func (g *GRDProc) decodeTemplate3Unopt(state *ProgressiveArithDecodeState) JBig2
 	gbContexts := state.GbContexts
 	decoder := state.ArithDecoder
 	for ; g.loopIndex < g.GBH; g.loopIndex++ {
+		if g.loopIndex&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				g.err = err
+				return JBig2SegmentError
+			}
+		}
 		h := int32(g.loopIndex)
 		if g.TPGDON {
 			if decoder.IsComplete() {

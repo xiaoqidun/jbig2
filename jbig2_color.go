@@ -56,6 +56,16 @@ func newColorImage(width, height int32) *image.NRGBA64 {
 	return image.NewNRGBA64(image.Rect(0, 0, int(width), int(height)))
 }
 
+// newZeroHeightColorImage 创建初始高度为零的彩色占位图像
+// 入参: width 宽度
+// 返回: *image.NRGBA64 图像
+func newZeroHeightColorImage(width int32) *image.NRGBA64 {
+	if width <= 0 {
+		return nil
+	}
+	return image.NewNRGBA64(image.Rect(0, 0, int(width), 0))
+}
+
 // readColorComponent 读取颜色分量
 // 入参: stream 位流, length 分量字节数
 // 返回: uint16 分量值, error 错误信息
@@ -98,6 +108,9 @@ func (d *Document) parseColorPalette(segment *Segment) Result {
 	count, err := d.stream.ReadInteger()
 	if err != nil || uint64(count)*3*uint64(length) > uint64(d.stream.GetByteLeft()) {
 		return ResultFailure
+	}
+	if err := d.budget.checkAddMemory(uint64(count) * 8); err != nil {
+		return d.fail(err)
 	}
 	palette := make([]color.NRGBA64, count)
 	for i := range palette {
@@ -267,12 +280,17 @@ func composeMonochromeColor(dst *image.NRGBA64, mask *Image, ri *RegionInfo) {
 // 返回: Result 组合结果
 func (d *Document) composeColorRegion(segment *Segment, ri *RegionInfo) Result {
 	if d.colorPage.Rect.Dy() != int(d.page.Height()) {
-		grown := newColorImage(d.page.Width(), d.page.Height())
-		if grown == nil {
-			return ResultFailure
+		if d.page.Height() > 0 {
+			if err := d.resizePageMemory(d.page.Width(), d.page.Height(), true); err != nil {
+				return d.fail(err)
+			}
+			grown := newColorImage(d.page.Width(), d.page.Height())
+			if grown == nil {
+				return ResultFailure
+			}
+			draw.Draw(grown, d.colorPage.Bounds(), d.colorPage, image.Point{}, draw.Src)
+			d.colorPage = grown
 		}
-		draw.Draw(grown, d.colorPage.Bounds(), d.colorPage, image.Point{}, draw.Src)
-		d.colorPage = grown
 	}
 	if segment.colorImage != nil {
 		point := image.Pt(int(ri.X), int(ri.Y))

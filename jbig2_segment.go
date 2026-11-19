@@ -63,6 +63,9 @@ type SegmentFlags struct {
 // Segment 保存段头、解析状态及解码结果
 type Segment struct {
 	colorImage               *image.NRGBA64
+	retainBits               []bool
+	memBytes                 uint64
+	released                 bool
 	Number                   uint32
 	Flags                    SegmentFlags
 	ReferredToSegmentCount   int32

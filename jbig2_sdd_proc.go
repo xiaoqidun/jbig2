@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -36,6 +37,8 @@ type SDDProc struct {
 	SDHUFFAGGINST      *HuffmanTable
 	SDAT               [8]int8
 	SDRAT              [4]int8
+	ctx                context.Context
+	budget             *decodeBudget
 }
 
 // NewSDDProc 创建符号字典解码器
@@ -48,6 +51,9 @@ func NewSDDProc() *SDDProc {
 // 入参: arithDecoder 算术解码器, gbContexts 通用上下文, grContexts 细化上下文
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {
+	if err := checkContext(s.ctx); err != nil {
+		return nil, err
+	}
 	IADH := NewArithIntDecoder()
 	IADW := NewArithIntDecoder()
 	IAAI := NewArithIntDecoder()
@@ -62,11 +68,18 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	IARDW := NewArithIntDecoder()
 	IARDH := NewArithIntDecoder()
 	SBSYMCODELENA := ceilLog2(s.SDNUMINSYMS + s.SDNUMNEWSYMS)
-	IAID := NewArithIaidDecoder(SBSYMCODELENA)
+	IAID, err := NewArithIaidDecoder(SBSYMCODELENA)
+	if err != nil {
+		return nil, err
+	}
 	SDNEWSYMS := make([]*Image, s.SDNUMNEWSYMS)
 	HCHEIGHT := uint32(0)
 	NSYMSDECODED := uint32(0)
+	var symMem uint64
 	for NSYMSDECODED < s.SDNUMNEWSYMS {
+		if err := checkContext(s.ctx); err != nil {
+			return nil, err
+		}
 		var BS *Image
 		HCDH, ok := IADH.Decode(arithDecoder)
 		if !ok {
@@ -78,6 +91,11 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 		}
 		SYMWIDTH := uint32(0)
 		for {
+			if NSYMSDECODED&63 == 0 {
+				if err := checkContext(s.ctx); err != nil {
+					return nil, err
+				}
+			}
 			DW, ok := IADW.Decode(arithDecoder)
 			if !ok {
 				break
@@ -101,6 +119,8 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 				pGRD.GBTEMPLATE = s.SDTEMPLATE
 				pGRD.TPGDON = false
 				pGRD.USESKIP = false
+				pGRD.ctx = s.ctx
+				pGRD.budget = s.budget
 				copy(pGRD.GBAT[:], s.SDAT[:])
 				var err error
 				BS, err = pGRD.DecodeArith(arithDecoder, gbContexts)
@@ -134,6 +154,8 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					pDecoder.SBDSOFFSET = 0
 					pDecoder.SBRTEMPLATE = s.SDRTEMPLATE
 					pDecoder.SBRAT = s.SDRAT
+					pDecoder.ctx = s.ctx
+					pDecoder.budget = s.budget
 					ids := &IntDecoderState{
 						IADT: IADT, IAFS: IAFS, IADS: IADS, IAIT: IAIT,
 						IARI: IARI, IARDW: IARDW, IARDH: IARDH, IARDX: IARDX, IARDY: IARDY,
@@ -179,6 +201,8 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					pGRRD.GRREFERENCEDY = RDYI
 					pGRRD.TPGRON = false
 					pGRRD.GRAT = s.SDRAT
+					pGRRD.ctx = s.ctx
+					pGRRD.budget = s.budget
 					if s.implicitRefinement && !s.SDRTEMPLATE {
 						BS, err = pGRRD.decodeReferenceTemplate0(arithDecoder, grContexts)
 					} else {
@@ -187,6 +211,12 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					if err != nil {
 						return nil, err
 					}
+				}
+			}
+			if BS != nil {
+				symMem += uint64(len(BS.data))
+				if err := s.budget.checkAddMemory(symMem); err != nil {
+					return nil, err
 				}
 			}
 			SDNEWSYMS[NSYMSDECODED] = BS
@@ -260,8 +290,11 @@ func (s *SDDProc) exportSymbols(symbols []*Image, flags []bool, count uint32, im
 // 入参: stream 位流, gbContexts 通用上下文, grContexts 细化上下文
 // 返回: *SymbolDict 符号字典, error 错误信息
 func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []ArithCtx) (*SymbolDict, error) {
+	if err := checkContext(s.ctx); err != nil {
+		return nil, err
+	}
 	huffmanDecoder := NewHuffmanDecoder(stream)
-	SBSYMCODELEN := uint32(ceilLog2(s.SDNUMINSYMS + s.SDNUMNEWSYMS))
+	SBSYMCODELEN := max(uint32(ceilLog2(s.SDNUMINSYMS+s.SDNUMNEWSYMS)), 1)
 	individualMMR := false
 	SDNEWSYMS := make([]*Image, s.SDNUMNEWSYMS)
 	var SDNEWSYMWIDTHS []uint32
@@ -270,6 +303,7 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 	}
 	HCHEIGHT := uint32(0)
 	NSYMSDECODED := uint32(0)
+	var symMem uint64
 	var aggregateTables [8]*HuffmanTable
 	if s.SDREFAGG {
 		aggregateTables = [8]*HuffmanTable{
@@ -279,6 +313,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 		}
 	}
 	for NSYMSDECODED < s.SDNUMNEWSYMS {
+		if err := checkContext(s.ctx); err != nil {
+			return nil, err
+		}
 		var HCDH int32
 		if res := huffmanDecoder.DecodeAValue(s.SDHUFFDH, &HCDH); res != 0 {
 			return nil, errors.New("failed to decode hcdh")
@@ -291,6 +328,11 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 		TOTWIDTH := uint32(0)
 		HCFIRSTSYM := NSYMSDECODED
 		for {
+			if NSYMSDECODED&63 == 0 {
+				if err := checkContext(s.ctx); err != nil {
+					return nil, err
+				}
+			}
 			var DW int32
 			res := huffmanDecoder.DecodeAValue(s.SDHUFFDW, &DW)
 			if res == JBig2OOB {
@@ -356,6 +398,8 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					pDecoder.SBHUFFRSIZE = aggregateTables[7]
 					pDecoder.SBRTEMPLATE = s.SDRTEMPLATE
 					pDecoder.SBRAT = s.SDRAT
+					pDecoder.ctx = s.ctx
+					pDecoder.budget = s.budget
 					var err error
 					BS, err = pDecoder.DecodeHuffman(stream, grContexts)
 					if err != nil {
@@ -390,6 +434,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 						return nil, errors.New("failed to decode refinement values")
 					}
 					stream.AlignByte()
+					if nVal < 0 || uint64(nVal) > uint64(stream.GetByteLeft()) {
+						return nil, errors.New("invalid refinement size")
+					}
 					pGRRD := NewGRRDProc()
 					pGRRD.GRW = SYMWIDTH
 					pGRRD.GRH = HCHEIGHT
@@ -399,14 +446,23 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					pGRRD.GRREFERENCEDY = RDYI
 					pGRRD.TPGRON = false
 					pGRRD.GRAT = s.SDRAT
-					arithDecoder := NewArithDecoder(stream)
+					pGRRD.ctx = s.ctx
+					pGRRD.budget = s.budget
+					subStream := NewBitStream(stream.GetPointer()[:nVal], stream.GetKey())
+					subStream.SetLittleEndian(stream.littleEndian)
+					arithDecoder := NewArithDecoder(subStream)
 					var err error
 					BS, err = pGRRD.Decode(arithDecoder, grContexts)
 					if err != nil {
 						return nil, err
 					}
-					stream.AlignByte()
-					stream.AddOffset(2)
+					stream.AddOffset(uint32(nVal))
+				}
+				if BS != nil {
+					symMem += uint64(len(BS.data))
+					if err := s.budget.checkAddMemory(symMem); err != nil {
+						return nil, err
+					}
 				}
 				SDNEWSYMS[NSYMSDECODED] = BS
 			}
@@ -423,6 +479,9 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 			stream.AlignByte()
 			var BHC *Image
 			if BMSIZE == 0 {
+				if _, err := s.budget.checkImage(int32(TOTWIDTH), int32(HCHEIGHT), false); err != nil {
+					return nil, err
+				}
 				stride := (TOTWIDTH + 7) / 8
 				if stream.GetByteLeft() < stride*HCHEIGHT {
 					return nil, errors.New("insufficient data for grid")
@@ -435,7 +494,7 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				copy(BHC.Data(), stream.GetPointer()[:dataSize])
 				stream.AddOffset(dataSize)
 			} else {
-				if stream.GetByteLeft() < uint32(BMSIZE) {
+				if BMSIZE < 0 || stream.GetByteLeft() < uint32(BMSIZE) {
 					return nil, errors.New("insufficient data for mmr")
 				}
 				mmrData := stream.GetPointer()[:BMSIZE]
@@ -443,27 +502,45 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				stream.AddOffset(uint32(BMSIZE))
 				mmrStream := NewBitStream(mmrData, 0)
 				var mmrFailed bool
+				var mmrErr error
 				if TOTWIDTH > JBig2MaxImageSize {
-					var err error
-					BHC, err = NewMMRDecompressor(int(TOTWIDTH), int(HCHEIGHT), mmrStream).Uncompress()
-					mmrFailed = err != nil
+					mmrDec := NewMMRDecompressor(int(TOTWIDTH), int(HCHEIGHT), mmrStream)
+					mmrDec.ctx = s.ctx
+					mmrDec.budget = s.budget
+					BHC, mmrErr = mmrDec.Uncompress()
+					mmrFailed = mmrErr != nil
 				} else {
 					pGRD := NewGRDProc()
 					pGRD.MMR = true
 					pGRD.GBW = TOTWIDTH
 					pGRD.GBH = HCHEIGHT
+					pGRD.ctx = s.ctx
+					pGRD.budget = s.budget
 					mmrFailed = pGRD.StartDecodeMMR(&BHC, mmrStream) == JBig2SegmentError
+					mmrErr = pGRD.err
 				}
 				if mmrFailed || BHC == nil {
+					if mmrErr != nil && (errors.Is(mmrErr, ErrLimitExceeded) || checkContext(s.ctx) != nil) {
+						return nil, mmrErr
+					}
 					if BMSIZE != 1 {
 						return nil, errors.New("mmr decoding failure")
 					}
 					stream.SetOffset(mmrStart)
 					for i := HCFIRSTSYM; i < NSYMSDECODED; i++ {
+						mmrDec := NewMMRDecompressor(int(SDNEWSYMWIDTHS[i]), int(HCHEIGHT), stream)
+						mmrDec.ctx = s.ctx
+						mmrDec.budget = s.budget
 						var err error
-						SDNEWSYMS[i], err = NewMMRDecompressor(int(SDNEWSYMWIDTHS[i]), int(HCHEIGHT), stream).Uncompress()
+						SDNEWSYMS[i], err = mmrDec.Uncompress()
 						if err != nil {
 							return nil, err
+						}
+						if SDNEWSYMS[i] != nil {
+							symMem += uint64(len(SDNEWSYMS[i].data))
+							if err := s.budget.checkAddMemory(symMem); err != nil {
+								return nil, err
+							}
 						}
 					}
 					individualMMR = true
@@ -476,6 +553,12 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 				for i := uint32(0); i < NSYMSDECODED-HCFIRSTSYM; i++ {
 					idx := currentSym + i
 					SDNEWSYMS[idx] = BHC.SubImage(int32(nTmp), 0, int32(SDNEWSYMWIDTHS[idx]), int32(HCHEIGHT))
+					if SDNEWSYMS[idx] != nil {
+						symMem += uint64(len(SDNEWSYMS[idx].data))
+						if err := s.budget.checkAddMemory(symMem); err != nil {
+							return nil, err
+						}
+					}
 					nTmp += SDNEWSYMWIDTHS[idx]
 				}
 			}

@@ -14,11 +14,16 @@
 
 package jbig2
 
+import "errors"
+
 // defaultAValue 算术编码区间寄存器A的初始值及归一化阈值
 const defaultAValue = 0x8000
 
 // arithQeStateCount 算术编码的概率状态数量
 const arithQeStateCount = 47
+
+// maxIaidCodeLen 符号标识算术解码器的最大编码位宽
+const maxIaidCodeLen = 24
 
 // kQeTable 算术编码的概率估计及状态转移表
 var kQeTable = [128]ArithQe{
@@ -144,6 +149,10 @@ func (c *ArithCtx) I() uint8 {
 // 返回: *ArithDecoder 解码器
 func NewArithDecoder(stream *BitStream) *ArithDecoder {
 	ad := &ArithDecoder{stream: stream, a: defaultAValue}
+	if stream == nil || !stream.IsInBounds() {
+		ad.complete = true
+		return ad
+	}
 	ad.b = stream.GetCurByteArith()
 	ad.c = (uint32(ad.b) ^ 0xff) << 16
 	ad.byteIn()
@@ -199,9 +208,9 @@ func (ad *ArithDecoder) tryDecodeFast(cx *ArithCtx) (int, bool) {
 	return 0, false
 }
 
-// IsComplete 是否已读取到位流末尾
+// IsComplete 是否因无输入数据而无法继续算术解码
 // 不表示整个页面已完成解码
-// 返回: bool 是否到达末尾
+// 返回: bool 是否处于完成或空流状态
 func (ad *ArithDecoder) IsComplete() bool {
 	return ad.complete
 }
@@ -224,9 +233,20 @@ func (ad *ArithDecoder) byteIn() {
 		ad.c = ad.c + 0xff00 - (uint32(ad.b) << 8)
 		ad.ct = 8
 	}
-	if !ad.stream.IsInBounds() {
-		ad.complete = true
+}
+
+// advancePastArithTerminator 将位流定位到算术编码终止标记之后
+// 入参: stream 位流
+func advancePastArithTerminator(stream *BitStream) {
+	stream.AlignByte()
+	rem := stream.GetPointer()
+	for i := 0; i+1 < len(rem); i++ {
+		if rem[i] == 0xff && rem[i+1] > 0x8f {
+			stream.AddOffset(uint32(i + 2))
+			return
+		}
 	}
+	stream.AddOffset(2)
 }
 
 // readValueA 归一化算术编码区间并补充码字位
@@ -287,15 +307,21 @@ func (aid *ArithIntDecoder) Decode(decoder *ArithDecoder) (int32, bool) {
 
 // NewArithIaidDecoder 创建符号标识的算术解码器
 // 入参: sbsymCodeLen 符号编码长度
-// 返回: *ArithIaidDecoder 解码器
-func NewArithIaidDecoder(sbsymCodeLen uint8) *ArithIaidDecoder {
-	return &ArithIaidDecoder{iaid: make([]ArithCtx, 1<<sbsymCodeLen), sbsymCodeLen: sbsymCodeLen}
+// 返回: *ArithIaidDecoder 解码器, error 错误信息
+func NewArithIaidDecoder(sbsymCodeLen uint8) (*ArithIaidDecoder, error) {
+	if sbsymCodeLen > maxIaidCodeLen {
+		return nil, errors.New("iaid code length exceeds limit")
+	}
+	return &ArithIaidDecoder{iaid: make([]ArithCtx, 1<<sbsymCodeLen), sbsymCodeLen: sbsymCodeLen}, nil
 }
 
 // Decode 解码符号标识
 // 入参: decoder 算术解码器
 // 返回: uint32 解码值, error 错误信息
 func (aid *ArithIaidDecoder) Decode(decoder *ArithDecoder) (uint32, error) {
+	if aid == nil || aid.sbsymCodeLen > maxIaidCodeLen || len(aid.iaid) < 1<<aid.sbsymCodeLen {
+		return 0, errors.New("invalid iaid decoder")
+	}
 	prev := 1
 	for i := uint8(0); i < aid.sbsymCodeLen; i++ {
 		cx := &aid.iaid[prev]

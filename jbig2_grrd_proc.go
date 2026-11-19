@@ -15,6 +15,7 @@
 package jbig2
 
 import (
+	"context"
 	"errors"
 )
 
@@ -28,6 +29,8 @@ type GRRDProc struct {
 	GRREFERENCEDY int32
 	GRREFERENCE   *Image
 	GRAT          [4]int8
+	ctx           context.Context
+	budget        *decodeBudget
 }
 
 // NewGRRDProc 创建通用细化区域解码器
@@ -48,11 +51,17 @@ func (g *GRRDProc) Decode(arithDecoder *ArithDecoder, grContexts []ArithCtx) (*I
 // 入参: arithDecoder 算术解码器, grContexts 上下文, reuse 复用图像
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeInto(arithDecoder *ArithDecoder, grContexts []ArithCtx, reuse *Image) (*Image, error) {
+	if err := checkContext(g.ctx); err != nil {
+		return nil, err
+	}
 	if g.GRW > JBig2MaxImageSize || g.GRH > JBig2MaxImageSize {
 		return nil, errors.New("image size too large")
 	}
 	if g.GRREFERENCE == nil {
 		return nil, errors.New("reference image is nil")
+	}
+	if _, err := g.budget.checkImage(int32(g.GRW), int32(g.GRH), false); err != nil {
+		return nil, err
 	}
 	if !g.GRTEMPLATE {
 		if g.GRAT[0] == -1 && g.GRAT[1] == -1 && g.GRAT[2] == -1 && g.GRAT[3] == -1 {
@@ -67,11 +76,22 @@ func (g *GRRDProc) decodeInto(arithDecoder *ArithDecoder, grContexts []ArithCtx,
 // 入参: decoder 算术解码器, contexts 上下文
 // 返回: *Image 图像, error 错误信息
 func (g *GRRDProc) decodeReferenceTemplate0(decoder *ArithDecoder, contexts []ArithCtx) (*Image, error) {
+	if err := checkContext(g.ctx); err != nil {
+		return nil, err
+	}
+	if _, err := g.budget.checkImage(int32(g.GRW), int32(g.GRH), false); err != nil {
+		return nil, err
+	}
 	img := NewImage(int32(g.GRW), int32(g.GRH))
 	if img == nil {
 		return nil, errors.New("failed to create image")
 	}
 	for y := int32(0); y < int32(g.GRH); y++ {
+		if y&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				return nil, err
+			}
+		}
 		for x := int32(0); x < int32(g.GRW); x++ {
 			rx, ry := x-g.GRREFERENCEDX, y-g.GRREFERENCEDY
 			var context uint32
@@ -108,6 +128,11 @@ func (g *GRRDProc) decodeTemplate0Opt(decoder *ArithDecoder, contexts []ArithCtx
 	referenceWidth := g.GRREFERENCE.width
 	referenceX := -g.GRREFERENCEDX
 	for h := int32(0); h < int32(g.GRH); h++ {
+		if h&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				return nil, err
+			}
+		}
 		if g.TPGRON {
 			if decoder.IsComplete() {
 				return nil, errors.New("decoder complete prematurely")
@@ -237,6 +262,11 @@ func (g *GRRDProc) decodeTemplate1Opt(decoder *ArithDecoder, contexts []ArithCtx
 	referenceWidth := g.GRREFERENCE.width
 	referenceX := -g.GRREFERENCEDX
 	for h := int32(0); h < int32(g.GRH); h++ {
+		if h&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				return nil, err
+			}
+		}
 		if g.TPGRON {
 			if decoder.IsComplete() {
 				return nil, errors.New("decoder complete prematurely")
@@ -353,6 +383,11 @@ func (g *GRRDProc) decodeTemplate0Custom(decoder *ArithDecoder, contexts []Arith
 	referenceWidth := g.GRREFERENCE.width
 	referenceX := -g.GRREFERENCEDX
 	for h := int32(0); h < int32(g.GRH); h++ {
+		if h&63 == 0 {
+			if err := checkContext(g.ctx); err != nil {
+				return nil, err
+			}
+		}
 		if g.TPGRON {
 			if decoder.IsComplete() {
 				return nil, errors.New("decoder complete prematurely")
