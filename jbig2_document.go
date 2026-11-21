@@ -85,7 +85,7 @@ type Globals struct {
 	segmentList  []*Segment
 	segmentIndex map[uint32]*Segment
 	memBytes     uint64
-	littleEndian bool
+	inputBytes   uint64
 	hasData      bool
 }
 

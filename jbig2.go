@@ -87,7 +87,7 @@ func ParseGlobalsWithOptions(data []byte, opts *DecodeOptions) (*Globals, error)
 		segmentList:  gdoc.segmentList,
 		segmentIndex: gdoc.segmentIndex,
 		memBytes:     budget.usedMemory,
-		littleEndian: littleEndian,
+		inputBytes:   uint64(len(data)),
 		hasData:      true,
 	}, nil
 }
@@ -151,8 +151,12 @@ func newDecoder(r io.Reader, globals []byte, parsedGlobals *Globals, embedded bo
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	if uint64(len(globals)) > limits.MaxInputBytes {
-		return nil, &LimitError{Resource: "global input bytes", Limit: limits.MaxInputBytes, Required: uint64(len(globals))}
+	globalBytes := uint64(len(globals))
+	if parsedGlobals != nil {
+		globalBytes = parsedGlobals.inputBytes
+	}
+	if globalBytes > limits.MaxInputBytes {
+		return nil, &LimitError{Resource: "global input bytes", Limit: limits.MaxInputBytes, Required: globalBytes}
 	}
 	budget := newDecodeBudget(limits)
 	if parsedGlobals != nil && parsedGlobals.memBytes > 0 {
