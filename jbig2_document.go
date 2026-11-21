@@ -80,6 +80,50 @@ type PageInfo struct {
 	MaxStripeSize     uint16
 }
 
+// Globals 预解析的只读全局段集合，可由多个解码器并发复用
+type Globals struct {
+	segmentList  []*Segment
+	segmentIndex map[uint32]*Segment
+	memBytes     uint64
+	littleEndian bool
+	hasData      bool
+}
+
+// attachDocument 为页面文档构造共享只读全局段索引的轻量上下文外壳
+// 入参: ctx 上下文, budget 页面解码预算
+// 返回: *Document 轻量全局上下文
+func (g *Globals) attachDocument(ctx context.Context, budget *decodeBudget) *Document {
+	if g == nil || !g.hasData {
+		return nil
+	}
+	return &Document{
+		segmentList:  g.segmentList,
+		segmentIndex: g.segmentIndex,
+		ctx:          ctx,
+		budget:       budget,
+	}
+}
+
+// decodeGlobalSegments 顺序解析当前文档中的全部全局段
+// 返回: error 错误信息
+func (d *Document) decodeGlobalSegments() error {
+	for {
+		if err := checkContext(d.ctx); err != nil {
+			return err
+		}
+		res := d.DecodeSequential()
+		if res == ResultEndReached {
+			return nil
+		}
+		if res == ResultFailure {
+			if d.err != nil {
+				return d.err
+			}
+			return errors.New("failed to parse global segments")
+		}
+	}
+}
+
 // GetSegments 获取段列表
 // 返回当前保留段的内部切片而非副本，后续解码或释放页面段会改变列表及段数据
 // 返回: []*Segment 段列表

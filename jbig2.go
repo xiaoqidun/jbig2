@@ -47,12 +47,57 @@ type Decoder struct {
 	pageIndex uint32
 }
 
+// ParseGlobals 预解析全局段数据并返回可并发复用的全局段集合
+// 预先完成全局符号字典、模式字典与自定义霍夫曼表的解码，空数据时返回空集合
+// 入参: data 全局段数据
+// 返回: *Globals 预解析的全局段集合, error 错误信息
+func ParseGlobals(data []byte) (*Globals, error) {
+	return ParseGlobalsWithOptions(data, nil)
+}
+
+// ParseGlobalsWithOptions 按指定选项预解析全局段数据并返回可并发复用的全局段集合
+// 预先完成全局符号字典、模式字典与自定义霍夫曼表的解码，空数据时返回空集合
+// 入参: data 全局段数据, opts 解码选项，为nil时使用默认配置
+// 返回: *Globals 预解析的全局段集合, error 错误信息
+func ParseGlobalsWithOptions(data []byte, opts *DecodeOptions) (*Globals, error) {
+	ctx, limits := normalizeDecodeOptions(opts)
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
+	if uint64(len(data)) > limits.MaxInputBytes {
+		return nil, &LimitError{Resource: "global input bytes", Limit: limits.MaxInputBytes, Required: uint64(len(data))}
+	}
+	if len(data) == 0 {
+		return &Globals{}, nil
+	}
+	littleEndian := len(data) >= 4 && data[0] != 0 && data[1] == 0 && data[2] == 0 && data[3] == 0
+	globalStream := NewBitStream(data, 0)
+	globalStream.SetLittleEndian(littleEndian)
+	budget := newDecodeBudget(limits)
+	gdoc := &Document{
+		stream:       globalStream,
+		segmentIndex: make(map[uint32]*Segment),
+		ctx:          ctx,
+		budget:       budget,
+	}
+	if err := gdoc.decodeGlobalSegments(); err != nil {
+		return nil, err
+	}
+	return &Globals{
+		segmentList:  gdoc.segmentList,
+		segmentIndex: gdoc.segmentIndex,
+		memBytes:     budget.usedMemory,
+		littleEndian: littleEndian,
+		hasData:      true,
+	}, nil
+}
+
 // NewDecoder 创建解码器
 // 创建时读取r的全部数据，不关闭r，页面在调用Decode或DecodeAll时解码
 // 入参: r 读取器
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	return newDecoder(r, nil, false, nil)
+	return newDecoder(r, nil, nil, false, nil)
 }
 
 // NewDecoderWithOptions 按指定选项创建解码器
@@ -60,7 +105,7 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 // 入参: r 读取器, opts 解码选项，为nil时使用默认配置
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithOptions(r io.Reader, opts *DecodeOptions) (*Decoder, error) {
-	return newDecoder(r, nil, false, opts)
+	return newDecoder(r, nil, nil, false, opts)
 }
 
 // NewDecoderWithGlobals 创建带全局段的解码器
@@ -70,7 +115,7 @@ func NewDecoderWithOptions(r io.Reader, opts *DecodeOptions) (*Decoder, error) {
 // 入参: r 读取器, globals 全局段数据
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
-	return newDecoder(r, globals, true, nil)
+	return newDecoder(r, globals, nil, true, nil)
 }
 
 // NewDecoderWithGlobalsAndOptions 按指定选项创建带全局段的解码器
@@ -79,13 +124,29 @@ func NewDecoderWithGlobals(r io.Reader, globals []byte) (*Decoder, error) {
 // 入参: r 读取器, globals 全局段数据, opts 解码选项，为nil时使用默认配置
 // 返回: *Decoder 解码器, error 错误信息
 func NewDecoderWithGlobalsAndOptions(r io.Reader, globals []byte, opts *DecodeOptions) (*Decoder, error) {
-	return newDecoder(r, globals, true, opts)
+	return newDecoder(r, globals, nil, true, opts)
+}
+
+// NewDecoderWithParsedGlobals 使用预解析全局段创建解码器
+// 创建时读取r的全部数据，不关闭r，多个并发解码器可安全共享同一globals实例
+// 入参: r 读取器, globals 预解析全局段集合，可为nil
+// 返回: *Decoder 解码器, error 错误信息
+func NewDecoderWithParsedGlobals(r io.Reader, globals *Globals) (*Decoder, error) {
+	return newDecoder(r, nil, globals, true, nil)
+}
+
+// NewDecoderWithParsedGlobalsAndOptions 按指定选项使用预解析全局段创建解码器
+// 创建时在资源限制与上下文约束内读取r的全部数据，不关闭r，多个并发解码器可安全共享同一globals实例
+// 入参: r 读取器, globals 预解析全局段集合，可为nil, opts 解码选项，为nil时使用默认配置
+// 返回: *Decoder 解码器, error 错误信息
+func NewDecoderWithParsedGlobalsAndOptions(r io.Reader, globals *Globals, opts *DecodeOptions) (*Decoder, error) {
+	return newDecoder(r, nil, globals, true, opts)
 }
 
 // newDecoder 创建解码器并按需识别嵌入数据
-// 入参: r 读取器, globals 全局段数据, embedded 是否允许嵌入数据, opts 解码选项
+// 入参: r 读取器, globals 全局段数据, parsedGlobals 预解析全局段, embedded 是否允许嵌入数据, opts 解码选项
 // 返回: *Decoder 解码器, error 错误信息
-func newDecoder(r io.Reader, globals []byte, embedded bool, opts *DecodeOptions) (*Decoder, error) {
+func newDecoder(r io.Reader, globals []byte, parsedGlobals *Globals, embedded bool, opts *DecodeOptions) (*Decoder, error) {
 	ctx, limits := normalizeDecodeOptions(opts)
 	if err := checkContext(ctx); err != nil {
 		return nil, err
@@ -93,18 +154,25 @@ func newDecoder(r io.Reader, globals []byte, embedded bool, opts *DecodeOptions)
 	if uint64(len(globals)) > limits.MaxInputBytes {
 		return nil, &LimitError{Resource: "global input bytes", Limit: limits.MaxInputBytes, Required: uint64(len(globals))}
 	}
+	budget := newDecodeBudget(limits)
+	if parsedGlobals != nil && parsedGlobals.memBytes > 0 {
+		if err := budget.reserveMemory(parsedGlobals.memBytes); err != nil {
+			return nil, err
+		}
+	}
 	data, err := readDecoderData(ctx, r, limits)
 	if err != nil {
 		return nil, err
 	}
+	hasGlobals := len(globals) > 0 || (parsedGlobals != nil && parsedGlobals.hasData)
 	probedData, randomAccess, littleEndian, orgMode, grouped := probeConfigs(data)
 	if probedData == nil {
-		if embedded && (len(globals) > 0 || validEmbeddedHeader(data)) {
+		if embedded && (hasGlobals || validEmbeddedHeader(data)) {
 			randomAccess = false
 			littleEndian = false
 			orgMode = 0
 			grouped = false
-			if len(globals) > 0 && len(data) >= 4 {
+			if hasGlobals && len(data) >= 4 {
 				if data[0] != 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 {
 					littleEndian = true
 				}
@@ -115,11 +183,21 @@ func newDecoder(r io.Reader, globals []byte, embedded bool, opts *DecodeOptions)
 	} else {
 		data = probedData
 	}
-	doc := NewDocument(data, globals, randomAccess, littleEndian)
+	var doc *Document
+	if parsedGlobals != nil && parsedGlobals.hasData {
+		doc = NewDocument(data, nil, randomAccess, littleEndian)
+		doc.OrgMode = orgMode
+		doc.Grouped = grouped
+		doc.ctx = ctx
+		doc.budget = budget
+		doc.globalContext = parsedGlobals.attachDocument(ctx, budget)
+		return &Decoder{doc: doc, pageIndex: 0}, nil
+	}
+	doc = NewDocument(data, globals, randomAccess, littleEndian)
 	doc.OrgMode = orgMode
 	doc.Grouped = grouped
 	doc.ctx = ctx
-	doc.budget = newDecodeBudget(limits)
+	doc.budget = budget
 	if doc.globalContext != nil {
 		doc.globalContext.ctx = ctx
 		doc.globalContext.budget = doc.budget
@@ -159,21 +237,7 @@ func (d *Document) parseGlobalSegments() error {
 	if d == nil || d.globalContext == nil {
 		return nil
 	}
-	for {
-		if err := checkContext(d.ctx); err != nil {
-			return err
-		}
-		res := d.globalContext.DecodeSequential()
-		if res == ResultEndReached {
-			return nil
-		}
-		if res == ResultFailure {
-			if d.globalContext.err != nil {
-				return d.globalContext.err
-			}
-			return errors.New("failed to parse global segments")
-		}
-	}
+	return d.globalContext.decodeGlobalSegments()
 }
 
 // readDecoderData 读取解码数据
