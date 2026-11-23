@@ -370,7 +370,7 @@ func (d *Document) ParseSegmentHeader(segment *Segment) Result {
 			segment.retainBits = make([]bool, segment.ReferredToSegmentCount)
 			for i := int32(0); i < segment.ReferredToSegmentCount; i++ {
 				bitIdx := i + 1
-				segment.retainBits[i] = (retainBytes[bitIdx/8] & (1 << uint(bitIdx%8))) != 0
+				segment.retainBits[i] = (retainBytes[bytesToSkip-1-bitIdx/8] & (1 << uint(bitIdx%8))) != 0
 			}
 		}
 	} else {
